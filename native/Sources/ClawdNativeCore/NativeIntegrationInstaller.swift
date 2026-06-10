@@ -148,7 +148,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     let versioned = supportedClaudeVersionedEvents()
     for event in Self.claudeCoreEvents + versioned.events {
       let desired = commandHook(
-        command: "\(quote(nodeBin)) \(quote(hookScript)) \(event)",
+        command: hookCommand(agentId: "claude-code", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "clawd-hook.js"),
         timeout: 5,
         async: true
       )
@@ -241,9 +241,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     if feature.changed { counters.updated += 1 }
     let nodeBin = resolveNodeBin(existingSettings: settings, marker: "codex-hook.js")
     let hookScript = projectRoot.appendingPathComponent("hooks/codex-hook.js").path
-    let desiredCommand = "\(quote(nodeBin)) \(quote(hookScript))"
-
     for event in Self.codexEvents {
+      let desiredCommand = hookCommand(agentId: "codex", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "codex-hook.js")
       let desired = commandHook(command: desiredCommand, timeout: event == "PermissionRequest" ? 600 : 30)
       counters.merge(syncNestedCommandHook(
         settings: &settings,
@@ -303,7 +302,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         "hooks": [[
           "name": "clawd",
           "type": "command",
-          "command": "\(quote(nodeBin)) \(quote(hookScript)) \(quote(event))",
+          "command": hookCommand(agentId: "qwen-code", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "qwen-code-hook.js"),
           "timeout": event == "PermissionRequest" ? 600_000 : 30_000
         ]]
       ]
@@ -366,7 +365,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       let desired = copilotEntry(
         nodeBin: nodeBin,
         hookScript: hookScript,
-        event: event
+        event: event,
+        command: hookCommand(agentId: "copilot-cli", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "copilot-hook.js")
       )
       if event == "permissionRequest", hasExternalPermissionHook || copilotPermissionArrayHasUserEntry(settings: settings) {
         counters.merge(removeWholeHookEntries(settings: &settings, event: event, marker: "copilot-hook.js"))
@@ -455,14 +455,32 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return hook
   }
 
-  private func copilotEntry(nodeBin: String, hookScript: String, event: String) -> [String: Any] {
-    let command = "\(quote(nodeBin)) \(quote(hookScript)) \(quote(event))"
+  private func copilotEntry(nodeBin: String, hookScript: String, event: String, command explicitCommand: String? = nil) -> [String: Any] {
+    let command = explicitCommand ?? "\(quote(nodeBin)) \(quote(hookScript)) \(quote(event))"
     return [
       "type": "command",
       "bash": command,
       "powershell": "& \(command)",
       "timeoutSec": event == "permissionRequest" ? 600 : 5
     ]
+  }
+
+  private func hookCommand(agentId: String, event: String, nodeBin: String, scriptPath: String, marker: String) -> String {
+    if let nativeHook = resolveNativeHookBinary() {
+      return "\(quote(nativeHook)) \(quote(agentId)) \(quote(event)) --marker \(quote(marker))"
+    }
+    return "\(quote(nodeBin)) \(quote(scriptPath)) \(quote(event))"
+  }
+
+  private func resolveNativeHookBinary() -> String? {
+    var candidates: [String] = []
+    if let explicit = environment["CLAWD_NATIVE_HOOK_BIN"]?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
+      candidates.append(explicit)
+    }
+    candidates.append(projectRoot.appendingPathComponent("native/.build/release/ClawdNativeHook").path)
+    candidates.append(projectRoot.appendingPathComponent("native/.build/debug/ClawdNativeHook").path)
+    candidates.append(Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ClawdNativeHook").path)
+    return candidates.first { fileManager.isExecutableFile(atPath: $0) }
   }
 
   private func syncNestedCommandHook(

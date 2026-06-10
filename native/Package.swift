@@ -9,7 +9,8 @@ let package = Package(
   ],
   products: [
     .library(name: "ClawdNativeCore", targets: ["ClawdNativeCore"]),
-    .executable(name: "ClawdNative", targets: ["ClawdNative"])
+    .executable(name: "ClawdNative", targets: ["ClawdNative"]),
+    .executable(name: "ClawdNativeHook", targets: ["ClawdNativeHook"])
   ],
   targets: [
     .target(name: "ClawdNativeCore"),
@@ -19,6 +20,10 @@ let package = Package(
       linkerSettings: [
         .linkedFramework("WebKit")
       ]
+    ),
+    .executableTarget(
+      name: "ClawdNativeHook",
+      dependencies: ["ClawdNativeCore"]
     ),
     .testTarget(
       name: "ClawdNativeCoreTests",

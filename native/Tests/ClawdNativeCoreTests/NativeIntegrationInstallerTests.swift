@@ -59,6 +59,24 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertTrue(String(describing: permission).contains("timeout = 600"))
   }
 
+  func testInstallerUsesNativeHookBinaryWhenAvailable() throws {
+    let fixture = try Fixture()
+    try FileManager.default.createDirectory(at: fixture.home.appendingPathComponent(".codex"), withIntermediateDirectories: true)
+    let hookBin = fixture.root.appendingPathComponent("ClawdNativeHook")
+    try Data("#!/bin/sh\n".utf8).write(to: hookBin)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookBin.path)
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node", "CLAWD_NATIVE_HOOK_BIN": hookBin.path]
+    )
+    _ = try XCTUnwrap(installer.install(agentId: "codex", preferences: Preferences()))
+
+    let settings = try fixture.readJSON(".codex/hooks.json")
+    XCTAssertTrue(String(describing: settings).contains("ClawdNativeHook"))
+    XCTAssertTrue(String(describing: settings).contains("codex-hook.js"))
+  }
+
   func testQwenInstallerUsesMatcherlessEventsAndLongPermissionTimeout() throws {
     let fixture = try Fixture()
     try FileManager.default.createDirectory(at: fixture.home.appendingPathComponent(".qwen"), withIntermediateDirectories: true)
