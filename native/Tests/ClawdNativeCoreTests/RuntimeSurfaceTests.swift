@@ -170,4 +170,14 @@ final class RuntimeSurfaceTests: XCTestCase {
     let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
     XCTAssertNil(json?["autoApproveAllPermissions"])
   }
+
+  func testShortcutDiagnosticsDetectsConflictsAndInvalidAccelerators() {
+    let diagnostics = ShortcutDiagnostics.validate([
+      "togglePet": "CommandOrControl+Shift+C",
+      "permissionAllow": "CommandOrControl+Shift+C",
+      "permissionDeny": "NoModifier"
+    ])
+    XCTAssertTrue(diagnostics.contains { $0.id == "shortcut-conflict:permissionAllow" && $0.status == "warning" })
+    XCTAssertTrue(diagnostics.contains { $0.id == "shortcut:permissionDeny" && $0.status == "warning" })
+  }
 }

@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var integrationManager: IntegrationManager?
   private var updaterService: UpdaterService?
   private var shortcutRuntime: ShortcutRuntime?
+  private var systemBehaviorRuntime: SystemBehaviorRuntime?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     let prefs = preferencesStore.get()
@@ -30,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     integrationManager = IntegrationManager(projectRoot: projectRoot)
     updaterService = UpdaterService(projectRoot: projectRoot)
+    systemBehaviorRuntime = SystemBehaviorRuntime(preferencesStore: preferencesStore, stateEngine: stateEngine)
     petWindow = PetWindowController(engine: stateEngine, preferencesStore: preferencesStore, projectRoot: projectRoot)
     shortcutRuntime = ShortcutRuntime(
       preferencesStore: preferencesStore,
@@ -82,12 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     petWindow?.showWindow(nil)
     shortcutRuntime?.start()
+    systemBehaviorRuntime?.start()
     syncIntegrations()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
     stopRemoteSSHProfiles()
     permissionCoordinator.cancelAll(with: .noDecision)
+    systemBehaviorRuntime?.stop()
     shortcutRuntime?.stop()
     remoteSSHRuntime.stopAll()
     server?.stop()

@@ -1,6 +1,30 @@
 import AppKit
 import ClawdNativeCore
 
+private enum SettingsTab: Int, CaseIterable {
+  case general
+  case appearance
+  case agents
+  case integrations
+  case shortcuts
+  case remote
+  case telegram
+  case about
+
+  var localizationKey: String {
+    switch self {
+    case .general: return "general"
+    case .appearance: return "appearance"
+    case .agents: return "agents"
+    case .integrations: return "integrations"
+    case .shortcuts: return "shortcuts"
+    case .remote: return "remote"
+    case .telegram: return "telegram"
+    case .about: return "about"
+    }
+  }
+}
+
 @MainActor
 final class SettingsWindowController: NSWindowController {
   private let preferencesStore: PreferencesStore
@@ -11,6 +35,7 @@ final class SettingsWindowController: NSWindowController {
   private var remoteStatusObserver: UUID?
   private var remoteFields: [String: NSTextField] = [:]
   private var remoteChecks: [String: NSButton] = [:]
+  private var selectedTab: SettingsTab = .general
 
   init(
     preferencesStore: PreferencesStore,
@@ -78,13 +103,46 @@ final class SettingsWindowController: NSWindowController {
       view.removeFromSuperview()
     }
     let prefs = preferencesStore.get()
+    stack.addArrangedSubview(tabControl(prefs))
+    stack.addArrangedSubview(separator())
 
-    let general = sectionTitle("General")
-    stack.addArrangedSubview(general)
+    switch selectedTab {
+    case .general:
+      addGeneralSection(prefs)
+    case .appearance:
+      addAppearanceSection(prefs)
+    case .agents:
+      addAgentsSection(prefs)
+    case .integrations:
+      addIntegrationsSection(prefs)
+    case .shortcuts:
+      addShortcutsSection(prefs)
+    case .remote:
+      addRemoteSSHSection(prefs)
+    case .telegram:
+      addTelegramSection(prefs)
+    case .about:
+      addAboutSection(prefs)
+    }
+  }
+
+  private func tabControl(_ prefs: Preferences) -> NSSegmentedControl {
+    let control = NSSegmentedControl(labels: SettingsTab.allCases.map { localized($0.localizationKey, prefs: prefs) }, trackingMode: .selectOne, target: self, action: #selector(changeSettingsTab(_:)))
+    control.segmentStyle = .rounded
+    control.selectedSegment = selectedTab.rawValue
+    return control
+  }
+
+  @objc private func changeSettingsTab(_ sender: NSSegmentedControl) {
+    selectedTab = SettingsTab(rawValue: sender.selectedSegment) ?? .general
+    reload()
+  }
+
+  private func addGeneralSection(_ prefs: Preferences) {
+    stack.addArrangedSubview(sectionTitle(localized("general", prefs: prefs)))
+    stack.addArrangedSubview(languageRow(prefs))
     stack.addArrangedSubview(booleanRow("Show Dock icon", key: "showDock", value: prefs.showDock))
     stack.addArrangedSubview(booleanRow("Open at login", key: "openAtLogin", value: prefs.openAtLogin))
-    stack.addArrangedSubview(booleanRow("Manage Claude hooks automatically", key: "manageClaudeHooksAutomatically", value: prefs.manageClaudeHooksAutomatically))
-    stack.addArrangedSubview(booleanRow("Auto-start with Claude", key: "autoStartWithClaude", value: prefs.autoStartWithClaude))
     stack.addArrangedSubview(booleanRow("Bubble follows pet", key: "bubbleFollowPet", value: prefs.bubbleFollowPet))
     stack.addArrangedSubview(booleanRow("Low power idle", key: "lowPowerIdleMode", value: prefs.lowPowerIdleMode))
     stack.addArrangedSubview(booleanRow("Keep awake while working", key: "keepAwakeWhileWorking", value: prefs.keepAwakeWhileWorking))
@@ -94,63 +152,32 @@ final class SettingsWindowController: NSWindowController {
     stack.addArrangedSubview(booleanRow("Mute sounds", key: "soundMuted", value: prefs.soundMuted))
     stack.addArrangedSubview(booleanRow("Flash on complete", key: "flashTaskbarOnComplete", value: prefs.flashTaskbarOnComplete))
     stack.addArrangedSubview(booleanRow("Auto-approve all permissions", key: "autoApproveAllPermissions", value: prefs.autoApproveAllPermissions))
+  }
 
-    stack.addArrangedSubview(separator())
-
-    let appearance = sectionTitle("Appearance")
-    stack.addArrangedSubview(appearance)
-
-    let themeRow = NSStackView()
-    themeRow.orientation = .horizontal
-    themeRow.spacing = 8
-    themeRow.addArrangedSubview(NSTextField(labelWithString: "Theme"))
-    let themePopup = NSPopUpButton()
-    for theme in ["clawd", "calico", "cloudling"] {
-      themePopup.addItem(withTitle: theme)
-      themePopup.lastItem?.representedObject = theme
-    }
-    themePopup.selectItem(withTitle: prefs.theme)
-    themePopup.target = self
-    themePopup.action = #selector(changeTheme(_:))
-    themeRow.addArrangedSubview(themePopup)
-    stack.addArrangedSubview(themeRow)
+  private func addAppearanceSection(_ prefs: Preferences) {
+    stack.addArrangedSubview(sectionTitle(localized("appearance", prefs: prefs)))
+    stack.addArrangedSubview(themeRow(prefs))
     stack.addArrangedSubview(textRow(label: "Theme variant", value: prefs.themeVariant[prefs.theme] ?? "default", identifier: "theme-variant", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: "Overrides JSON", value: prefs.themeOverrides[prefs.theme]?.shortDescription ?? "", identifier: "theme-overrides-json", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Overrides support theme states, miniMode, timings, reactions, hitbox, idleAnimations, and displayHintMap."))
 
     let mini = NSButton(checkboxWithTitle: "Mini mode", target: self, action: #selector(toggleMini(_:)))
     mini.state = prefs.miniMode ? .on : .off
     stack.addArrangedSubview(mini)
-
-    let edgeRow = NSStackView()
-    edgeRow.orientation = .horizontal
-    edgeRow.spacing = 8
-    edgeRow.addArrangedSubview(NSTextField(labelWithString: "Mini edge"))
-    let edgePopup = NSPopUpButton()
-    for edge in ["right", "left"] {
-      edgePopup.addItem(withTitle: edge)
-      edgePopup.lastItem?.representedObject = edge
-    }
-    edgePopup.selectItem(withTitle: prefs.miniEdge)
-    edgePopup.target = self
-    edgePopup.action = #selector(changeMiniEdge(_:))
-    edgeRow.addArrangedSubview(edgePopup)
-    stack.addArrangedSubview(edgeRow)
+    stack.addArrangedSubview(miniEdgeRow(prefs))
 
     stack.addArrangedSubview(separator())
-
-    let hudHeading = sectionTitle("Session HUD")
-    stack.addArrangedSubview(hudHeading)
+    stack.addArrangedSubview(sectionTitle("Session HUD"))
     stack.addArrangedSubview(booleanRow("Enable Session HUD", key: "sessionHudEnabled", value: prefs.sessionHudEnabled))
     stack.addArrangedSubview(booleanRow("Show state labels", key: "sessionHudShowStateLabels", value: prefs.sessionHudShowStateLabels))
     stack.addArrangedSubview(booleanRow("Show elapsed time", key: "sessionHudShowElapsed", value: prefs.sessionHudShowElapsed))
     stack.addArrangedSubview(booleanRow("Show context usage", key: "sessionHudShowContextUsage", value: prefs.sessionHudShowContextUsage))
     stack.addArrangedSubview(booleanRow("Cleanup detached sessions", key: "sessionHudCleanupDetached", value: prefs.sessionHudCleanupDetached))
     stack.addArrangedSubview(booleanRow("Pin Session HUD", key: "sessionHudPinned", value: prefs.sessionHudPinned))
+  }
 
-    stack.addArrangedSubview(separator())
-
-    let heading = sectionTitle("Agents")
-    stack.addArrangedSubview(heading)
-
+  private func addAgentsSection(_ prefs: Preferences) {
+    stack.addArrangedSubview(sectionTitle(localized("agents", prefs: prefs)))
     for agent in AgentRegistry.all {
       let row = NSStackView()
       row.orientation = .horizontal
@@ -165,10 +192,33 @@ final class SettingsWindowController: NSWindowController {
       permissions.state = AgentGate.isAgentPermissionsEnabled(prefs, agent.id) ? .on : .off
       permissions.isEnabled = agent.capabilities.permissionApproval
       row.addArrangedSubview(permissions)
-      stack.addArrangedSubview(row)
-    }
 
-    stack.addArrangedSubview(separator())
+      let notifications = NSButton(checkboxWithTitle: "notification hook", target: self, action: #selector(toggleAgentNotification(_:)))
+      notifications.identifier = NSUserInterfaceItemIdentifier(agent.id)
+      notifications.state = (prefs.agents[agent.id]?.notificationHookEnabled ?? true) ? .on : .off
+      row.addArrangedSubview(notifications)
+      stack.addArrangedSubview(row)
+
+      let details = [
+        agent.capabilities.stateOnly ? "state-only" : "state+permission",
+        agent.capabilities.terminalFocus ? "terminal focus" : "no terminal focus",
+        NativeIntegrationInstaller.supports(agent.id) ? "native installer" : "JS installer"
+      ].joined(separator: " / ")
+      stack.addArrangedSubview(NSTextField(labelWithString: "  \(agent.id): \(details)"))
+
+      if agent.id == "claude-code" {
+        stack.addArrangedSubview(agentSubagentRow(agentId: agent.id, prefs: prefs))
+      }
+      if agent.id == "codex" {
+        stack.addArrangedSubview(textRow(label: "Codex mode", value: prefs.agents[agent.id]?.permissionMode ?? "intercept", identifier: "agent-permissionMode-\(agent.id)", action: #selector(updateTextPreference(_:))))
+      }
+    }
+  }
+
+  private func addIntegrationsSection(_ prefs: Preferences) {
+    stack.addArrangedSubview(sectionTitle(localized("integrations", prefs: prefs)))
+    stack.addArrangedSubview(booleanRow("Manage Claude hooks automatically", key: "manageClaudeHooksAutomatically", value: prefs.manageClaudeHooksAutomatically))
+    stack.addArrangedSubview(booleanRow("Auto-start with Claude", key: "autoStartWithClaude", value: prefs.autoStartWithClaude))
 
     let bubbles = NSButton(checkboxWithTitle: "Enable permission bubbles", target: self, action: #selector(toggleBubbles(_:)))
     bubbles.state = prefs.permissionBubblesEnabled && !prefs.hideBubbles ? .on : .off
@@ -178,42 +228,126 @@ final class SettingsWindowController: NSWindowController {
     tray.state = prefs.showTray ? .on : .off
     stack.addArrangedSubview(tray)
 
-    let runtimeHeading = sectionTitle("Runtime")
-    stack.addArrangedSubview(runtimeHeading)
-    stack.addArrangedSubview(NSTextField(labelWithString: "Mobile preview: GET /mobile-preview on the local hook server"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Remote SSH status: GET /remote-ssh/status on the local hook server"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Updater: \(UpdaterRuntime.gitModePlan().check.joined(separator: " "))"))
-
     stack.addArrangedSubview(separator())
+    stack.addArrangedSubview(sectionTitle("Runtime"))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Local hook server: \(localPort().map { "127.0.0.1:\($0)" } ?? "not running")"))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Mobile preview: GET /mobile-preview"))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Remote SSH status: GET /remote-ssh/status"))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Updater: \(UpdaterRuntime.gitModePlan().check.joined(separator: " "))"))
+  }
 
-    let shortcutsHeading = sectionTitle("Shortcuts")
-    stack.addArrangedSubview(shortcutsHeading)
+  private func addShortcutsSection(_ prefs: Preferences) {
+    stack.addArrangedSubview(sectionTitle(localized("shortcuts", prefs: prefs)))
     stack.addArrangedSubview(textRow(label: "Toggle pet", value: prefs.shortcuts["togglePet"] ?? "", identifier: "shortcut-togglePet", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(textRow(label: "Allow", value: prefs.shortcuts["permissionAllow"] ?? "", identifier: "shortcut-permissionAllow", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(textRow(label: "Deny", value: prefs.shortcuts["permissionDeny"] ?? "", identifier: "shortcut-permissionDeny", action: #selector(updateTextPreference(_:))))
 
     stack.addArrangedSubview(separator())
+    stack.addArrangedSubview(sectionTitle("Diagnostics"))
+    for diagnostic in ShortcutDiagnostics.validate(prefs.shortcuts) {
+      stack.addArrangedSubview(NSTextField(labelWithString: "\(diagnostic.status): \(diagnostic.message)"))
+    }
 
-    let hardwareHeading = sectionTitle("Hardware Buddy")
-    stack.addArrangedSubview(hardwareHeading)
+    stack.addArrangedSubview(separator())
+    stack.addArrangedSubview(sectionTitle("Hardware Buddy"))
     stack.addArrangedSubview(booleanRow("Enable Hardware Buddy", key: "hardwareBuddy.enabled", value: prefs.hardwareBuddy.enabled))
     stack.addArrangedSubview(booleanRow("Allow hardware permission replies", key: "hardwareBuddy.permissionsEnabled", value: prefs.hardwareBuddy.permissionsEnabled))
     stack.addArrangedSubview(booleanRow("Enable quick commands", key: "hardwareBuddy.quickCommandsEnabled", value: prefs.hardwareBuddy.quickCommandsEnabled))
     stack.addArrangedSubview(textRow(label: "Device", value: prefs.hardwareBuddy.deviceAddress ?? "", identifier: "hardware-device", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(textRow(label: "Name prefix", value: prefs.hardwareBuddy.namePrefix, identifier: "hardware-prefix", action: #selector(updateTextPreference(_:))))
+  }
 
-    stack.addArrangedSubview(separator())
-    addRemoteSSHSection(prefs)
-
-    stack.addArrangedSubview(separator())
-
-    let telegramHeading = sectionTitle("Telegram Approval")
-    stack.addArrangedSubview(telegramHeading)
+  private func addTelegramSection(_ prefs: Preferences) {
+    stack.addArrangedSubview(sectionTitle("Telegram Approval"))
     let tgEnabled = NSButton(checkboxWithTitle: "Enable Telegram approval", target: self, action: #selector(toggleTelegram(_:)))
     tgEnabled.state = prefs.telegramApproval.enabled ? .on : .off
     stack.addArrangedSubview(tgEnabled)
     stack.addArrangedSubview(textRow(label: "Token file", value: prefs.telegramApproval.botTokenFile, identifier: "telegram-token-file", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(textRow(label: "Chat ID", value: prefs.telegramApproval.chatId, identifier: "telegram-chat-id", action: #selector(updateTextPreference(_:))))
+  }
+
+  private func addAboutSection(_ prefs: Preferences) {
+    stack.addArrangedSubview(sectionTitle(localized("about", prefs: prefs)))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Clawd Native"))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Project root: \(projectRoot.path)"))
+    stack.addArrangedSubview(NSTextField(labelWithString: "Preferences: \(PreferencesStore.defaultURL().path)"))
+
+    let actions = NSStackView()
+    actions.orientation = .horizontal
+    actions.spacing = 8
+    actions.addArrangedSubview(NSButton(title: localized("doctor", prefs: prefs), target: self, action: #selector(showDoctor)))
+    actions.addArrangedSubview(NSButton(title: localized("about", prefs: prefs), target: self, action: #selector(showAbout)))
+    stack.addArrangedSubview(actions)
+
+    stack.addArrangedSubview(separator())
+    stack.addArrangedSubview(sectionTitle("Doctor Preview"))
+    for item in Diagnostics.localReport(
+      serverPort: localPort(),
+      preferencesURL: PreferencesStore.defaultURL(),
+      projectRoot: projectRoot,
+      preferences: prefs,
+      remoteSSHStatuses: remoteSSHRuntime.listStatuses()
+    ) {
+      stack.addArrangedSubview(NSTextField(labelWithString: "\(item.status): \(item.id) - \(item.message)"))
+    }
+  }
+
+  private func languageRow(_ prefs: Preferences) -> NSView {
+    let row = NSStackView()
+    row.orientation = .horizontal
+    row.spacing = 8
+    row.addArrangedSubview(NSTextField(labelWithString: "Language"))
+    let popup = NSPopUpButton()
+    for lang in ["en", "zh", "ko", "ja"] {
+      popup.addItem(withTitle: lang)
+      popup.lastItem?.representedObject = lang
+    }
+    popup.selectItem(withTitle: prefs.lang)
+    popup.target = self
+    popup.action = #selector(changeLanguage(_:))
+    row.addArrangedSubview(popup)
+    return row
+  }
+
+  private func themeRow(_ prefs: Preferences) -> NSView {
+    let row = NSStackView()
+    row.orientation = .horizontal
+    row.spacing = 8
+    row.addArrangedSubview(NSTextField(labelWithString: "Theme"))
+    let themePopup = NSPopUpButton()
+    for theme in ["clawd", "calico", "cloudling"] {
+      themePopup.addItem(withTitle: theme)
+      themePopup.lastItem?.representedObject = theme
+    }
+    themePopup.selectItem(withTitle: prefs.theme)
+    themePopup.target = self
+    themePopup.action = #selector(changeTheme(_:))
+    row.addArrangedSubview(themePopup)
+    return row
+  }
+
+  private func miniEdgeRow(_ prefs: Preferences) -> NSView {
+    let row = NSStackView()
+    row.orientation = .horizontal
+    row.spacing = 8
+    row.addArrangedSubview(NSTextField(labelWithString: "Mini edge"))
+    let edgePopup = NSPopUpButton()
+    for edge in ["right", "left"] {
+      edgePopup.addItem(withTitle: edge)
+      edgePopup.lastItem?.representedObject = edge
+    }
+    edgePopup.selectItem(withTitle: prefs.miniEdge)
+    edgePopup.target = self
+    edgePopup.action = #selector(changeMiniEdge(_:))
+    row.addArrangedSubview(edgePopup)
+    return row
+  }
+
+  private func agentSubagentRow(agentId: String, prefs: Preferences) -> NSButton {
+    let button = NSButton(checkboxWithTitle: "subagent permissions", target: self, action: #selector(toggleAgentSubagent(_:)))
+    button.identifier = NSUserInterfaceItemIdentifier(agentId)
+    button.state = (prefs.agents[agentId]?.subagentPermissionsEnabled ?? true) ? .on : .off
+    return button
   }
 
   private func addRemoteSSHSection(_ prefs: Preferences) {
@@ -494,6 +628,13 @@ final class SettingsWindowController: NSWindowController {
     }
   }
 
+  @objc private func changeLanguage(_ sender: NSPopUpButton) {
+    guard let lang = sender.selectedItem?.representedObject as? String else { return }
+    _ = try? preferencesStore.update { prefs in
+      prefs.lang = lang
+    }
+  }
+
   @objc private func toggleTelegram(_ sender: NSButton) {
     _ = try? preferencesStore.update { prefs in
       prefs.telegramApproval.enabled = sender.state == .on
@@ -509,9 +650,24 @@ final class SettingsWindowController: NSWindowController {
         prefs.telegramApproval.chatId = sender.stringValue
       } else if id == "theme-variant" {
         prefs.themeVariant[prefs.theme] = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "default"
+      } else if id == "theme-overrides-json" {
+        let trimmed = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+          prefs.themeOverrides.removeValue(forKey: prefs.theme)
+        } else if let data = trimmed.data(using: .utf8),
+                  let value = try? JSONDecoder().decode(JSONValue.self, from: data) {
+          prefs.themeOverrides[prefs.theme] = value
+        } else {
+          showAlert("Theme overrides must be valid JSON.")
+        }
       } else if id.hasPrefix("shortcut-") {
         let key = String(id.dropFirst("shortcut-".count))
         prefs.shortcuts[key] = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      } else if id.hasPrefix("agent-permissionMode-") {
+        let agentId = String(id.dropFirst("agent-permissionMode-".count))
+        var entry = prefs.agents[agentId] ?? AgentSettings()
+        entry.permissionMode = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        prefs.agents[agentId] = entry
       } else if id == "hardware-device" {
         prefs.hardwareBuddy.deviceAddress = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
       } else if id == "hardware-prefix" {
@@ -603,6 +759,24 @@ final class SettingsWindowController: NSWindowController {
     }
   }
 
+  @objc private func toggleAgentNotification(_ sender: NSButton) {
+    guard let agentId = sender.identifier?.rawValue else { return }
+    _ = try? preferencesStore.update { prefs in
+      var entry = prefs.agents[agentId] ?? AgentSettings()
+      entry.notificationHookEnabled = sender.state == .on
+      prefs.agents[agentId] = entry
+    }
+  }
+
+  @objc private func toggleAgentSubagent(_ sender: NSButton) {
+    guard let agentId = sender.identifier?.rawValue else { return }
+    _ = try? preferencesStore.update { prefs in
+      var entry = prefs.agents[agentId] ?? AgentSettings()
+      entry.subagentPermissionsEnabled = sender.state == .on
+      prefs.agents[agentId] = entry
+    }
+  }
+
   @objc private func toggleBubbles(_ sender: NSButton) {
     _ = try? preferencesStore.update { prefs in
       prefs.permissionBubblesEnabled = sender.state == .on
@@ -662,6 +836,74 @@ final class SettingsWindowController: NSWindowController {
     alert.messageText = message
     alert.runModal()
   }
+
+  @objc private func showDoctor() {
+    let prefs = preferencesStore.get()
+    let report = Diagnostics.localReport(
+      serverPort: localPort(),
+      preferencesURL: PreferencesStore.defaultURL(),
+      projectRoot: projectRoot,
+      preferences: prefs,
+      remoteSSHStatuses: remoteSSHRuntime.listStatuses()
+    )
+    showAlert(report.map { "\($0.status): \($0.id)\n\($0.message)" }.joined(separator: "\n\n"))
+  }
+
+  @objc private func showAbout() {
+    showAlert("Clawd Native\nSwift/AppKit runtime for Clawd on Desk.\nProject: \(projectRoot.path)")
+  }
+
+  private func localized(_ key: String, prefs: Preferences) -> String {
+    let table = Self.localizedStrings[prefs.lang] ?? Self.localizedStrings["en"] ?? [:]
+    return table[key] ?? Self.localizedStrings["en"]?[key] ?? key
+  }
+
+  private static let localizedStrings: [String: [String: String]] = [
+    "en": [
+      "general": "General",
+      "appearance": "Appearance",
+      "agents": "Agents",
+      "integrations": "Integrations",
+      "shortcuts": "Shortcuts",
+      "remote": "Remote",
+      "telegram": "Telegram",
+      "about": "About",
+      "doctor": "Doctor"
+    ],
+    "zh": [
+      "general": "通用",
+      "appearance": "外观",
+      "agents": "Agent",
+      "integrations": "集成",
+      "shortcuts": "快捷键",
+      "remote": "远程",
+      "telegram": "Telegram",
+      "about": "关于",
+      "doctor": "诊断"
+    ],
+    "ko": [
+      "general": "일반",
+      "appearance": "모양",
+      "agents": "에이전트",
+      "integrations": "통합",
+      "shortcuts": "단축키",
+      "remote": "원격",
+      "telegram": "Telegram",
+      "about": "정보",
+      "doctor": "진단"
+    ],
+    "ja": [
+      "general": "一般",
+      "appearance": "外観",
+      "agents": "Agent",
+      "integrations": "連携",
+      "shortcuts": "ショートカット",
+      "remote": "リモート",
+      "telegram": "Telegram",
+      "about": "情報",
+      "doctor": "診断"
+    ]
+  ]
 
   private func escapeAppleScript(_ value: String) -> String {
     value

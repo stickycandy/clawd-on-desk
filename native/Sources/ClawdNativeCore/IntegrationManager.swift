@@ -16,14 +16,24 @@ public struct IntegrationResult: Codable, Equatable, Sendable {
 
 public final class IntegrationManager: @unchecked Sendable {
   public let projectRoot: URL
+  private let nativeInstaller: NativeIntegrationInstaller
 
   public init(projectRoot: URL) {
     self.projectRoot = projectRoot
+    self.nativeInstaller = NativeIntegrationInstaller(projectRoot: projectRoot)
   }
 
   public func syncEnabledStartupIntegrations(preferences: Preferences) -> [IntegrationResult] {
     AgentRegistry.all.compactMap { descriptor in
       guard AgentGate.isAgentEnabled(preferences, descriptor.id) else { return nil }
+      if let native = nativeInstaller.install(agentId: descriptor.id, preferences: preferences) {
+        return IntegrationResult(
+          agentId: descriptor.id,
+          command: ["native", "install", descriptor.id],
+          status: native.status,
+          output: native.output
+        )
+      }
       guard let command = descriptor.installCommand else { return nil }
       return run(command, agentId: descriptor.id)
     }
@@ -32,11 +42,27 @@ public final class IntegrationManager: @unchecked Sendable {
   public func repairAll(preferences: Preferences) -> [IntegrationResult] {
     AgentRegistry.all.compactMap { descriptor in
       guard AgentGate.isAgentEnabled(preferences, descriptor.id) else { return nil }
+      if let native = nativeInstaller.install(agentId: descriptor.id, preferences: preferences) {
+        return IntegrationResult(
+          agentId: descriptor.id,
+          command: ["native", "repair", descriptor.id],
+          status: native.status,
+          output: native.output
+        )
+      }
       return repair(agentId: descriptor.id)
     }
   }
 
   public func repair(agentId: String) -> IntegrationResult {
+    if let native = nativeInstaller.install(agentId: agentId, preferences: Preferences()) {
+      return IntegrationResult(
+        agentId: agentId,
+        command: ["native", "repair", agentId],
+        status: native.status,
+        output: native.output
+      )
+    }
     guard let descriptor = AgentRegistry.agent(agentId), let command = descriptor.installCommand else {
       return IntegrationResult(agentId: agentId, command: [], status: "skip", output: "No installer registered")
     }
@@ -44,6 +70,14 @@ public final class IntegrationManager: @unchecked Sendable {
   }
 
   public func uninstall(agentId: String) -> IntegrationResult {
+    if let native = nativeInstaller.uninstall(agentId: agentId) {
+      return IntegrationResult(
+        agentId: agentId,
+        command: ["native", "uninstall", agentId],
+        status: native.status,
+        output: native.output
+      )
+    }
     guard let descriptor = AgentRegistry.agent(agentId), let command = descriptor.uninstallCommand else {
       return IntegrationResult(agentId: agentId, command: [], status: "skip", output: "No uninstaller registered")
     }

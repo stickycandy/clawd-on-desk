@@ -58,6 +58,31 @@ public enum Diagnostics {
       status: missingInstallers.isEmpty && FileManager.default.fileExists(atPath: hooksDir.path) ? "ok" : "warning",
       message: missingInstallers.isEmpty ? "Installer scripts present" : "Missing installers: \(missingInstallers.joined(separator: ", "))"
     ))
+    let nativeAgents = NativeIntegrationInstaller.supportedAgentIds.sorted().joined(separator: ", ")
+    items.append(.init(
+      id: "native-installers",
+      status: "ok",
+      message: "Swift installers: \(nativeAgents)"
+    ))
+    let shortcutWarnings = ShortcutDiagnostics.validate(preferences.shortcuts)
+      .filter { $0.status == "warning" }
+    items.append(.init(
+      id: "shortcuts",
+      status: shortcutWarnings.isEmpty ? "ok" : "warning",
+      message: shortcutWarnings.isEmpty
+        ? "Shortcuts valid"
+        : shortcutWarnings.map(\.message).joined(separator: "; ")
+    ))
+    items.append(.init(
+      id: "macos-behavior",
+      status: "ok",
+      message: [
+        preferences.openAtLogin ? "open-at-login:on" : "open-at-login:off",
+        preferences.keepAwakeWhileWorking ? "keep-awake:on" : "keep-awake:off",
+        preferences.flashTaskbarOnComplete ? "dock-flash:on" : "dock-flash:off",
+        preferences.miniMode && !preferences.disableMiniMode ? "mini:on" : "mini:off"
+      ].joined(separator: ", ")
+    ))
     if remoteSSHStatuses.isEmpty {
       items.append(.init(id: "remote-ssh", status: "idle", message: "No active Remote SSH tunnel"))
     } else {
