@@ -200,12 +200,6 @@ public enum AgentRegistry {
   }
 
   public static var currentPlatform: String {
-    #if os(Windows)
-    return "win32"
-    #elseif os(Linux)
-    return "linux"
-    #else
     return "darwin"
-    #endif
   }
 }

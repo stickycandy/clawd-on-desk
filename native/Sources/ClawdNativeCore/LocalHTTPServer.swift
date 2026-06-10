@@ -10,16 +10,24 @@ public final class LocalHTTPServer: @unchecked Sendable {
   private let preferences: @Sendable () -> Preferences
   private let permissions: PermissionCoordinator
   private let projectRoot: URL?
+  private let remoteSSHStatuses: @Sendable () -> [RemoteSSHStatus]
   private let queue = DispatchQueue(label: "clawd.native.http")
   private var listener: NWListener?
 
   public private(set) var port: Int?
 
-  public init(engine: StateEngine, preferences: @escaping @Sendable () -> Preferences, permissions: PermissionCoordinator, projectRoot: URL? = nil) {
+  public init(
+    engine: StateEngine,
+    preferences: @escaping @Sendable () -> Preferences,
+    permissions: PermissionCoordinator,
+    projectRoot: URL? = nil,
+    remoteSSHStatuses: @escaping @Sendable () -> [RemoteSSHStatus] = { [] }
+  ) {
     self.engine = engine
     self.preferences = preferences
     self.permissions = permissions
     self.projectRoot = projectRoot
+    self.remoteSSHStatuses = remoteSSHStatuses
   }
 
   @discardableResult
@@ -107,9 +115,13 @@ public final class LocalHTTPServer: @unchecked Sendable {
       let items = Diagnostics.localReport(
         serverPort: port,
         preferencesURL: PreferencesStore.defaultURL(),
-        projectRoot: projectRoot ?? FileManager.default.currentDirectoryPathURL
+        projectRoot: projectRoot ?? FileManager.default.currentDirectoryPathURL,
+        remoteSSHStatuses: remoteSSHStatuses()
       )
       let data = (try? JSONEncoder.iso8601.encode(items)) ?? Data("[]".utf8)
+      send(connection, status: 200, contentType: "application/json", bodyData: data)
+    case ("GET", "/remote-ssh/status"):
+      let data = (try? JSONEncoder.iso8601.encode(remoteSSHStatuses())) ?? Data("[]".utf8)
       send(connection, status: 200, contentType: "application/json", bodyData: data)
     default:
       send(connection, status: 404, body: "not found")

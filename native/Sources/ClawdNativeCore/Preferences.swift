@@ -27,21 +27,115 @@ public struct AgentSettings: Codable, Equatable, Sendable {
 
 public struct RemoteSSHProfile: Codable, Equatable, Identifiable, Sendable {
   public var id: String
-  public var name: String
+  public var label: String
   public var host: String
   public var user: String
-  public var port: Int
+  public var port: Int?
   public var remoteRoot: String
   public var enabled: Bool
+  public var identityFile: String?
+  public var remoteForwardPort: Int
+  public var hostPrefix: String?
+  public var autoStartCodexMonitor: Bool
+  public var connectOnLaunch: Bool
+  public var createdAt: Double
+  public var lastDeployedAt: Double?
+  public var detectedRemoteNodeBin: String?
+  public var detectedRemoteNodeVersion: String?
+  public var detectedRemoteNodeSource: String?
+  public var detectedRemoteNodeAt: Double?
 
-  public init(id: String, name: String, host: String, user: String, port: Int = 22, remoteRoot: String = "~/.clawd", enabled: Bool = false) {
+  private enum CodingKeys: String, CodingKey {
+    case id, label, host, user, port, remoteRoot, enabled, identityFile, remoteForwardPort, hostPrefix
+    case autoStartCodexMonitor, connectOnLaunch, createdAt, lastDeployedAt
+    case detectedRemoteNodeBin, detectedRemoteNodeVersion, detectedRemoteNodeSource, detectedRemoteNodeAt
+  }
+
+  private enum LegacyCodingKeys: String, CodingKey {
+    case name
+  }
+
+  public init(
+    id: String,
+    name: String? = nil,
+    label: String? = nil,
+    host: String,
+    user: String = "",
+    port: Int? = 22,
+    remoteRoot: String = "~/.clawd",
+    enabled: Bool = false,
+    identityFile: String? = nil,
+    remoteForwardPort: Int = 23333,
+    hostPrefix: String? = nil,
+    autoStartCodexMonitor: Bool = false,
+    connectOnLaunch: Bool = false,
+    createdAt: Double = Date().timeIntervalSince1970 * 1000,
+    lastDeployedAt: Double? = nil,
+    detectedRemoteNodeBin: String? = nil,
+    detectedRemoteNodeVersion: String? = nil,
+    detectedRemoteNodeSource: String? = nil,
+    detectedRemoteNodeAt: Double? = nil
+  ) {
     self.id = id
-    self.name = name
+    self.label = label ?? name ?? id
     self.host = host
     self.user = user
     self.port = port
     self.remoteRoot = remoteRoot
     self.enabled = enabled
+    self.identityFile = identityFile
+    self.remoteForwardPort = remoteForwardPort
+    self.hostPrefix = hostPrefix
+    self.autoStartCodexMonitor = autoStartCodexMonitor
+    self.connectOnLaunch = connectOnLaunch
+    self.createdAt = createdAt
+    self.lastDeployedAt = lastDeployedAt
+    self.detectedRemoteNodeBin = detectedRemoteNodeBin
+    self.detectedRemoteNodeVersion = detectedRemoteNodeVersion
+    self.detectedRemoteNodeSource = detectedRemoteNodeSource
+    self.detectedRemoteNodeAt = detectedRemoteNodeAt
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+    let now = Date().timeIntervalSince1970 * 1000
+
+    id = try container.decode(String.self, forKey: .id)
+    label = try container.decodeIfPresent(String.self, forKey: .label)
+      ?? legacy.decodeIfPresent(String.self, forKey: .name)
+      ?? id
+    host = try container.decode(String.self, forKey: .host)
+    user = try container.decodeIfPresent(String.self, forKey: .user) ?? ""
+    port = try container.decodeIfPresent(Int.self, forKey: .port) ?? 22
+    remoteRoot = try container.decodeIfPresent(String.self, forKey: .remoteRoot) ?? "~/.clawd"
+    enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+    identityFile = try container.decodeIfPresent(String.self, forKey: .identityFile)
+    remoteForwardPort = try container.decodeIfPresent(Int.self, forKey: .remoteForwardPort) ?? 23333
+    hostPrefix = try container.decodeIfPresent(String.self, forKey: .hostPrefix)
+    autoStartCodexMonitor = try container.decodeIfPresent(Bool.self, forKey: .autoStartCodexMonitor) ?? false
+    connectOnLaunch = try container.decodeIfPresent(Bool.self, forKey: .connectOnLaunch) ?? false
+    createdAt = try container.decodeIfPresent(Double.self, forKey: .createdAt) ?? now
+    lastDeployedAt = try container.decodeIfPresent(Double.self, forKey: .lastDeployedAt)
+    detectedRemoteNodeBin = try container.decodeIfPresent(String.self, forKey: .detectedRemoteNodeBin)
+    detectedRemoteNodeVersion = try container.decodeIfPresent(String.self, forKey: .detectedRemoteNodeVersion)
+    detectedRemoteNodeSource = try container.decodeIfPresent(String.self, forKey: .detectedRemoteNodeSource)
+    detectedRemoteNodeAt = try container.decodeIfPresent(Double.self, forKey: .detectedRemoteNodeAt)
+  }
+
+  public var name: String {
+    label
+  }
+
+  public var effectiveHost: String {
+    let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedUser = user.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmedHost.contains("@") || trimmedUser.isEmpty { return trimmedHost }
+    return "\(trimmedUser)@\(trimmedHost)"
+  }
+
+  public var effectivePort: Int {
+    port ?? 22
   }
 }
 
@@ -215,6 +309,7 @@ public struct Preferences: Codable, Equatable, Sendable {
     copy.notificationBubbleAutoCloseSeconds = min(max(copy.notificationBubbleAutoCloseSeconds, 0), 600)
     copy.permissionBubbleAutoCloseSeconds = min(max(copy.permissionBubbleAutoCloseSeconds, 0), 600)
     copy.updateBubbleAutoCloseSeconds = min(max(copy.updateBubbleAutoCloseSeconds, 0), 600)
+    copy.remoteSshProfiles = RemoteSSHProfileValidator.sanitize(copy.remoteSshProfiles)
     for descriptor in AgentRegistry.all where copy.agents[descriptor.id] == nil {
       copy.agents[descriptor.id] = Preferences.defaultAgents()[descriptor.id] ?? AgentSettings()
     }
@@ -222,7 +317,118 @@ public struct Preferences: Codable, Equatable, Sendable {
   }
 }
 
+public struct RemoteSSHProfileValidationError: Error, Equatable, Sendable, CustomStringConvertible {
+  public var message: String
+  public var description: String { message }
+
+  public init(_ message: String) {
+    self.message = message
+  }
+}
+
+public enum RemoteSSHProfileValidator {
+  public static let remoteForwardPorts: Set<Int> = [23333, 23334, 23335, 23336, 23337]
+  private static let hostBare = try! NSRegularExpression(pattern: #"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"#)
+  private static let hostUser = try! NSRegularExpression(pattern: #"^[a-zA-Z0-9][a-zA-Z0-9._-]*@[a-zA-Z0-9][a-zA-Z0-9._-]*$"#)
+  private static let idRegex = try! NSRegularExpression(pattern: #"^[a-zA-Z0-9_-]{1,64}$"#)
+
+  public static func validate(_ profile: RemoteSSHProfile) -> Result<Void, RemoteSSHProfileValidationError> {
+    guard matches(idRegex, profile.id) else {
+      return .failure(.init("profile.id must be 1-64 chars [a-zA-Z0-9_-]"))
+    }
+    guard isValidLabel(profile.label) else {
+      return .failure(.init("profile.label must be 1-100 chars and contain no control characters"))
+    }
+    guard isValidHost(profile.effectiveHost) else {
+      return .failure(.init("profile.host must be a hostname or user@hostname"))
+    }
+    if let port = profile.port, port < 1 || port > 65535 {
+      return .failure(.init("profile.port must be in [1, 65535]"))
+    }
+    if let identityFile = profile.identityFile, !identityFile.isEmpty, !isValidIdentityFile(identityFile) {
+      return .failure(.init("profile.identityFile must be absolute and not start with '-'"))
+    }
+    guard remoteForwardPorts.contains(profile.remoteForwardPort) else {
+      return .failure(.init("profile.remoteForwardPort must be one of \(remoteForwardPorts.sorted())"))
+    }
+    if let hostPrefix = profile.hostPrefix, !hostPrefix.isEmpty, !isValidHostPrefix(hostPrefix) {
+      return .failure(.init("profile.hostPrefix contains forbidden shell characters"))
+    }
+    if let node = profile.detectedRemoteNodeBin, !isValidRemoteNodeBin(node) {
+      return .failure(.init("profile.detectedRemoteNodeBin must be an absolute POSIX path"))
+    }
+    if let version = profile.detectedRemoteNodeVersion, !isSupportedRemoteNodeVersion(version) {
+      return .failure(.init("profile.detectedRemoteNodeVersion must be v14+"))
+    }
+    return .success(())
+  }
+
+  public static func sanitize(_ profiles: [RemoteSSHProfile]) -> [RemoteSSHProfile] {
+    var seen = Set<String>()
+    var out: [RemoteSSHProfile] = []
+    for var profile in profiles {
+      profile.id = profile.id.trimmingCharacters(in: .whitespacesAndNewlines)
+      profile.label = profile.label.trimmingCharacters(in: .whitespacesAndNewlines)
+      profile.host = profile.host.trimmingCharacters(in: .whitespacesAndNewlines)
+      profile.user = profile.user.trimmingCharacters(in: .whitespacesAndNewlines)
+      profile.identityFile = profile.identityFile?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+      profile.hostPrefix = profile.hostPrefix?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+      profile.detectedRemoteNodeBin = profile.detectedRemoteNodeBin?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+      profile.detectedRemoteNodeVersion = profile.detectedRemoteNodeVersion?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+      profile.detectedRemoteNodeSource = profile.detectedRemoteNodeSource?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+      if profile.remoteForwardPort == 0 { profile.remoteForwardPort = 23333 }
+      if profile.createdAt <= 0 { profile.createdAt = Date().timeIntervalSince1970 * 1000 }
+      if case .success = validate(profile), !seen.contains(profile.id) {
+        seen.insert(profile.id)
+        out.append(profile)
+      }
+    }
+    return out
+  }
+
+  public static func isValidHost(_ value: String) -> Bool {
+    let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !value.isEmpty, value.count <= 255 else { return false }
+    return matches(hostBare, value) || matches(hostUser, value)
+  }
+
+  public static func isValidIdentityFile(_ value: String) -> Bool {
+    !value.isEmpty
+      && !value.hasPrefix("-")
+      && value.hasPrefix("/")
+      && value.rangeOfCharacter(from: .controlCharacters) == nil
+  }
+
+  public static func isValidHostPrefix(_ value: String) -> Bool {
+    value.rangeOfCharacter(from: .controlCharacters) == nil
+      && value.rangeOfCharacter(from: CharacterSet(charactersIn: "'\"`$\\!")) == nil
+  }
+
+  public static func isValidRemoteNodeBin(_ value: String) -> Bool {
+    value.hasPrefix("/") && value.rangeOfCharacter(from: .controlCharacters) == nil
+  }
+
+  public static func isSupportedRemoteNodeVersion(_ value: String) -> Bool {
+    guard value.lowercased().hasPrefix("v") else { return false }
+    let majorText = value.dropFirst().split(separator: ".").first.flatMap(String.init) ?? ""
+    return (Int(majorText) ?? 0) >= 14
+  }
+
+  private static func isValidLabel(_ value: String) -> Bool {
+    !value.isEmpty && value.count <= 100 && value.rangeOfCharacter(from: .controlCharacters) == nil
+  }
+
+  private static func matches(_ regex: NSRegularExpression, _ value: String) -> Bool {
+    let range = NSRange(value.startIndex..<value.endIndex, in: value)
+    return regex.firstMatch(in: value, range: range)?.range == range
+  }
+}
+
 private extension String {
+  var nilIfEmpty: String? {
+    isEmpty ? nil : self
+  }
+
   var isValidClawdSize: Bool {
     self == "S" || self == "M" || self == "L" || range(of: #"^P:\d+(?:\.\d+)?$"#, options: .regularExpression) != nil
   }

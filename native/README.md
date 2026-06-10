@@ -41,8 +41,8 @@ Implemented:
   real theme asset playback for built-in Clawd, Calico, and Cloudling assets.
 - Mobile preview HTML at `GET /mobile-preview` and diagnostics at
   `GET /diagnostics`.
-- Core runtime surfaces for Remote SSH tunnel command/lifecycle, Git updater
-  commands, and Telegram approval status/summary formatting.
+- Remote SSH profile settings, tunnel lifecycle, health probe, deploy/repair
+  hooks flow, Codex remote monitor lifecycle, and status diagnostics.
 - Telegram approval sidecar using Bot API `sendMessage`/`getUpdates` callback
   flow, plus native Settings controls for token file and chat id.
 - Git updater check/apply/relaunch flow exposed from the status menu.
@@ -54,8 +54,6 @@ Not yet at Electron parity:
 - Per-agent installer internals still delegate to the existing JS hook scripts;
   the macOS shell app is native, but the cross-agent hook payload scripts remain
   the shared compatibility layer.
-- Remote SSH deploy/repair UI and Windows/Linux native packaging are explicitly
-  out of scope for this pass.
 - Per-pixel parity for every Electron animation timing/transition remains a
   tuning task, but the native feature paths are implemented.
 

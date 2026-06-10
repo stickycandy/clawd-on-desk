@@ -3,16 +3,104 @@ import XCTest
 
 final class RuntimeSurfaceTests: XCTestCase {
   func testRemoteSSHTunnelCommandMatchesReverseForwardingShape() {
-    let profile = RemoteSSHProfile(id: "p1", name: "prod", host: "example.com", user: "alice", port: 2200)
+    let profile = RemoteSSHProfile(
+      id: "p1",
+      name: "prod",
+      host: "example.com",
+      user: "alice",
+      port: 2200,
+      identityFile: "/Users/alice/.ssh/id_ed25519"
+    )
     XCTAssertEqual(RemoteSSHRuntime.tunnelCommand(profile: profile, localPort: 23334), [
       "ssh",
-      "-N",
-      "-R",
-      "127.0.0.1:23333:127.0.0.1:23334",
+      "-T",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=15",
+      "-i",
+      "/Users/alice/.ssh/id_ed25519",
       "-p",
       "2200",
+      "-N",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-o",
+      "ServerAliveInterval=30",
+      "-o",
+      "ServerAliveCountMax=3",
+      "-R",
+      "127.0.0.1:23333:127.0.0.1:23334",
       "alice@example.com"
     ])
+  }
+
+  func testRemoteSSHScpArgsUseUppercasePortFlag() {
+    let profile = RemoteSSHProfile(id: "p1", host: "example.com", user: "alice", port: 2200)
+    XCTAssertEqual(RemoteSSHRuntime.buildScpArgs(profile: profile), [
+      "-q",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=15",
+      "-P",
+      "2200"
+    ])
+  }
+
+  func testRemoteSSHProbeCommandAcceptsNativeAndElectronServerHeaders() {
+    let command = RemoteSSHRuntime.buildProbeCommand(remoteForwardPort: 23335)
+    XCTAssertTrue(command.contains("23335"))
+    XCTAssertTrue(command.contains("clawd-on-desk-native"))
+    XCTAssertTrue(command.contains("clawd-on-desk"))
+  }
+
+  func testRemoteNodeProbeOutputParserRequiresAbsoluteSupportedNode() throws {
+    let parsed = try XCTUnwrap(RemoteSSHRuntime.parseRemoteNodeProbeOutput("""
+    CLAWD_REMOTE_NODE_BIN=/usr/local/bin/node
+    CLAWD_REMOTE_NODE_VERSION=v20.11.1
+    CLAWD_REMOTE_NODE_SOURCE=path
+    """))
+    XCTAssertEqual(parsed.nodeBin, "/usr/local/bin/node")
+    XCTAssertEqual(parsed.version, "v20.11.1")
+    XCTAssertEqual(parsed.source, "path")
+    XCTAssertNil(RemoteSSHRuntime.parseRemoteNodeProbeOutput("""
+    CLAWD_REMOTE_NODE_BIN=node
+    CLAWD_REMOTE_NODE_VERSION=v20.11.1
+    CLAWD_REMOTE_NODE_SOURCE=path
+    """))
+    XCTAssertNil(RemoteSSHRuntime.parseRemoteNodeProbeOutput("""
+    CLAWD_REMOTE_NODE_BIN=/usr/bin/node
+    CLAWD_REMOTE_NODE_VERSION=v12.22.0
+    CLAWD_REMOTE_NODE_SOURCE=path
+    """))
+  }
+
+  func testRemoteSSHProfileDecodesLegacyNameAndValidatesFields() throws {
+    let data = Data(#"{"id":"p1","name":"legacy","host":"example.com"}"#.utf8)
+    let profile = try JSONDecoder().decode(RemoteSSHProfile.self, from: data)
+    XCTAssertEqual(profile.label, "legacy")
+    XCTAssertEqual(profile.name, "legacy")
+    XCTAssertEqual(profile.effectivePort, 22)
+    if case .failure(let error) = RemoteSSHProfileValidator.validate(profile) {
+      XCTFail("legacy profile should validate: \(error.message)")
+    }
+
+    let badHost = RemoteSSHProfile(id: "bad", label: "Bad", host: "-bad.example.com")
+    if case .success = RemoteSSHProfileValidator.validate(badHost) {
+      XCTFail("invalid host should fail validation")
+    }
+
+    let badPort = RemoteSSHProfile(id: "bad-port", label: "Bad", host: "example.com", remoteForwardPort: 12345)
+    if case .success = RemoteSSHProfileValidator.validate(badPort) {
+      XCTFail("invalid remote forward port should fail validation")
+    }
+  }
+
+  func testRemoteSSHDeployManifestContainsSharedHookFiles() {
+    XCTAssertTrue(RemoteSSHRuntime.hookFiles.contains("clawd-hook.js"))
+    XCTAssertTrue(RemoteSSHRuntime.hookFiles.contains("codex-remote-monitor.js"))
+    XCTAssertTrue(RemoteSSHRuntime.hookFiles.contains("copilot-install.js"))
   }
 
   func testUpdaterAheadBehindParser() {

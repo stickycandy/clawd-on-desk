@@ -13,7 +13,12 @@ public struct DiagnosticItem: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum Diagnostics {
-  public static func localReport(serverPort: Int?, preferencesURL: URL, projectRoot: URL) -> [DiagnosticItem] {
+  public static func localReport(
+    serverPort: Int?,
+    preferencesURL: URL,
+    projectRoot: URL,
+    remoteSSHStatuses: [RemoteSSHStatus] = []
+  ) -> [DiagnosticItem] {
     var items: [DiagnosticItem] = []
     if let serverPort {
       items.append(.init(id: "local-server", status: "ok", message: "Listening on 127.0.0.1:\(serverPort)"))
@@ -31,6 +36,17 @@ public enum Diagnostics {
       status: FileManager.default.fileExists(atPath: themes.path) ? "ok" : "warning",
       message: themes.path
     ))
+    if remoteSSHStatuses.isEmpty {
+      items.append(.init(id: "remote-ssh", status: "idle", message: "No active Remote SSH tunnel"))
+    } else {
+      for status in remoteSSHStatuses {
+        items.append(.init(
+          id: "remote-ssh:\(status.profileId)",
+          status: status.state,
+          message: status.message
+        ))
+      }
+    }
     return items
   }
 }

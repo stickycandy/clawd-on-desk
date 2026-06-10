@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private let stateEngine = StateEngine()
   private let permissionCoordinator = PermissionCoordinator()
   private let terminalFocusManager = TerminalFocusManager()
+  private let remoteSSHRuntime = RemoteSSHRuntime()
   private lazy var telegramSidecar = TelegramApprovalSidecar(configProvider: { [preferencesStore] in
     preferencesStore.get().telegramApproval
   })
@@ -36,7 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       petWindow: { [weak self] in self?.petWindow?.window },
       focusManager: terminalFocusManager
     )
-    settings = SettingsWindowController(preferencesStore: preferencesStore)
+    settings = SettingsWindowController(
+      preferencesStore: preferencesStore,
+      remoteSSHRuntime: remoteSSHRuntime,
+      projectRoot: projectRoot,
+      localPort: { [weak self] in self?.server?.port }
+    )
     statusMenu = StatusMenuController(
       stateEngine: stateEngine,
       dashboard: dashboard,
@@ -55,10 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     do {
       let httpServer = LocalHTTPServer(engine: stateEngine, preferences: { [preferencesStore] in
         preferencesStore.get()
-      }, permissions: permissionCoordinator, projectRoot: projectRoot)
+      }, permissions: permissionCoordinator, projectRoot: projectRoot, remoteSSHStatuses: { [remoteSSHRuntime] in
+        remoteSSHRuntime.listStatuses()
+      })
       let port = try httpServer.start()
       server = httpServer
       print("Clawd Native hook server listening on 127.0.0.1:\(port)")
+      connectRemoteSSHProfilesOnLaunch(localPort: port)
     } catch {
       NSAlert(error: error).runModal()
     }
@@ -68,7 +77,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    stopRemoteSSHProfiles()
     permissionCoordinator.cancelAll(with: .noDecision)
+    remoteSSHRuntime.stopAll()
     server?.stop()
   }
 
@@ -108,6 +119,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           NSApp.terminate(nil)
         }
       }
+    }
+  }
+
+  private func connectRemoteSSHProfilesOnLaunch(localPort: Int) {
+    let profiles = preferencesStore.get().remoteSshProfiles
+      .filter { $0.enabled && $0.connectOnLaunch }
+    guard !profiles.isEmpty else { return }
+    DispatchQueue.global(qos: .utility).async { [remoteSSHRuntime] in
+      for profile in profiles {
+        let status = remoteSSHRuntime.connect(profile: profile, localPort: localPort)
+        if status.state == "running", profile.autoStartCodexMonitor {
+          _ = remoteSSHRuntime.startCodexMonitor(profile: profile)
+        }
+      }
+    }
+  }
+
+  private func stopRemoteSSHProfiles() {
+    let profiles = preferencesStore.get().remoteSshProfiles
+      .filter { $0.autoStartCodexMonitor }
+    for profile in profiles {
+      _ = remoteSSHRuntime.stopCodexMonitor(profile: profile)
     }
   }
 }
