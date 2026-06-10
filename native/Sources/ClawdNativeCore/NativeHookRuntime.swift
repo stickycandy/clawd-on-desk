@@ -73,12 +73,27 @@ public struct NativeHookRuntime {
       payload: payload
     )
     addToolMetadata(payload: payload, body: &body)
+    let transcript = transcriptRecords(path: payload.string("transcript_path"), maxBytes: 262_144)
     if let title = normalizedTitle(payload.string("session_title")) {
+      body["session_title"] = .string(title)
+    } else if let title = claudeSessionTitle(records: transcript) {
       body["session_title"] = .string(title)
     } else if event == "UserPromptSubmit", let title = normalizedPromptTitle(payload.string("prompt")) {
       body["session_title"] = .string(title)
     }
     if event == "Stop" {
+      if let apiError = claudeApiError(records: transcript, sessionId: payload.string("session_id")) {
+        body["state"] = .string("error")
+        body["event"] = .string("ApiError")
+        body["failure_kind"] = .string("api_error")
+        body["api_error_type"] = .string(apiError)
+        body["error_present"] = .bool(true)
+      } else if let assistant = lastClaudeAssistantText(records: transcript, sessionId: payload.string("session_id")) {
+        body["assistant_last_output"] = .string(assistant.text)
+        if assistant.truncated {
+          body["assistant_last_output_truncated"] = .bool(true)
+        }
+      }
       if let count = payload.arrayCount("background_tasks"), count > 0 {
         body["background_tasks_count"] = .number(Double(count))
       }
@@ -120,8 +135,18 @@ public struct NativeHookRuntime {
     body["hook_source"] = .string("codex-official")
     addToolMetadata(payload: payload, body: &body)
     addCodexFields(payload: payload, body: &body)
+    if let title = codexThreadName(sessionId: body.string("session_id")) {
+      body["session_title"] = .string(title)
+    }
     if let active = payload.bool("stop_hook_active") {
       body["stop_hook_active"] = .bool(active)
+    }
+    if hookEvent == "Stop",
+       let assistant = lastCodexAssistantText(records: transcriptRecords(path: payload.string("transcript_path"), maxBytes: 262_144)) {
+      body["assistant_last_output"] = .string(assistant.text)
+      if assistant.truncated {
+        body["assistant_last_output_truncated"] = .bool(true)
+      }
     }
     return .state(.object(body))
   }
@@ -177,6 +202,8 @@ public struct NativeHookRuntime {
     addCopilotToolMetadata(payload: payload, body: &body)
     if let title = normalizedTitle(payload.string("sessionTitle") ?? payload.string("session_title")) {
       body["session_title"] = .string(title)
+    } else if let title = copilotWorkspaceTitle(sessionId: payload.string("sessionId") ?? payload.string("session_id")) {
+      body["session_title"] = .string(title)
     }
     return .state(.object(body))
   }
@@ -230,8 +257,35 @@ public struct NativeHookRuntime {
     if environment["CLAWD_REMOTE"] == "1" {
       body["host"] = .string(environment["CLAWD_HOST_PREFIX"] ?? "remote")
     } else {
-      body["source_pid"] = .number(Double(ProcessInfo.processInfo.processIdentifier))
+      let process = NativeProcessResolver.resolve(agentNames: processNames(for: agentId))
+      if let sourcePid = process.sourcePid {
+        body["source_pid"] = .number(Double(sourcePid))
+      }
+      if let agentPid = process.agentPid {
+        body["agent_pid"] = .number(Double(agentPid))
+      }
+      if !process.pidChain.isEmpty {
+        body["pid_chain"] = .array(process.pidChain.map { .number(Double($0)) })
+      }
+      if let editor = process.editor {
+        body["editor"] = .string(editor)
+      }
       body["platform"] = .string("darwin")
+    }
+  }
+
+  private func processNames(for agentId: String) -> Set<String> {
+    switch agentId {
+    case "claude-code":
+      return ["claude"]
+    case "codex":
+      return ["codex"]
+    case "qwen-code":
+      return ["qwen"]
+    case "copilot-cli":
+      return ["copilot"]
+    default:
+      return []
     }
   }
 
@@ -297,6 +351,289 @@ public struct NativeHookRuntime {
   private func normalizedPromptTitle(_ value: String?) -> String? {
     guard let line = value?.split(whereSeparator: \.isNewline).first else { return nil }
     return normalizedTitle(String(line)).map { String($0.prefix(40)) }
+  }
+
+  private func transcriptRecords(path: String?, maxBytes: Int) -> [[String: JSONValue]] {
+    guard let path = path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else { return [] }
+    let url = URL(fileURLWithPath: path)
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
+    defer { try? handle.close() }
+    let fileSize = (try? handle.seekToEnd()) ?? 0
+    let readSize = min(UInt64(maxBytes), fileSize)
+    guard readSize > 0 else { return [] }
+    try? handle.seek(toOffset: fileSize - readSize)
+    let data = (try? handle.read(upToCount: Int(readSize))) ?? Data()
+    guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return [] }
+    var lines = text.components(separatedBy: CharacterSet.newlines)
+    if fileSize > readSize, !lines.isEmpty {
+      lines.removeFirst()
+    }
+    return lines.compactMap { line in
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return nil }
+      guard case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+      return object
+    }
+  }
+
+  private func claudeSessionTitle(records: [[String: JSONValue]]) -> String? {
+    var latest: String?
+    for record in records {
+      let type = record.string("type") ?? ""
+      guard type == "custom-title" || type == "agent-name" else { continue }
+      latest = normalizedTitle(
+        record.string("customTitle")
+          ?? record.string("title")
+          ?? record.string("custom_title")
+          ?? record.string("agentName")
+          ?? record.string("agent_name")
+      ) ?? latest
+    }
+    return latest
+  }
+
+  private func claudeApiError(records: [[String: JSONValue]], sessionId: String?) -> String? {
+    let allowed = Set([
+      "authentication_failed",
+      "oauth_org_not_allowed",
+      "billing_error",
+      "rate_limit",
+      "invalid_request",
+      "model_not_found",
+      "server_error",
+      "unknown",
+      "max_output_tokens"
+    ])
+    var lastErrorIndex = -1
+    var errorType = "unknown"
+    for index in stride(from: records.count - 1, through: 0, by: -1) {
+      let record = records[index]
+      guard record.bool("isApiErrorMessage") == true else { continue }
+      guard assistantEntryMatchesSession(record, sessionId: sessionId) else { continue }
+      lastErrorIndex = index
+      let candidate = record.string("api_error_type") ?? record.string("apiErrorType") ?? "unknown"
+      errorType = allowed.contains(candidate) ? candidate : "unknown"
+      break
+    }
+    guard lastErrorIndex >= 0 else { return nil }
+    if lastErrorIndex + 1 < records.count {
+      for record in records[(lastErrorIndex + 1)..<records.count] {
+        if claudeAssistantEntryIsTurnBoundary(record, sessionId: sessionId) { return nil }
+        if record.string("type") == "assistant", record.bool("isApiErrorMessage") != true {
+          return nil
+        }
+      }
+    }
+    return errorType
+  }
+
+  private func lastClaudeAssistantText(records: [[String: JSONValue]], sessionId: String?) -> (text: String, truncated: Bool)? {
+    guard !records.isEmpty else { return nil }
+    for record in records.reversed() {
+      if claudeAssistantEntryIsTurnBoundary(record, sessionId: sessionId) { break }
+      guard record.string("type") == "assistant",
+            record.bool("isApiErrorMessage") != true,
+            assistantEntryMatchesSession(record, sessionId: sessionId),
+            !assistantEntryLooksSubagent(record)
+      else { continue }
+      let text = normalizeAssistantText(textParts(from: record["message"]?.objectValue?["content"] ?? record["content"]).joined(separator: "\n\n"))
+      if !text.isEmpty {
+        return clampAssistantText(text)
+      }
+    }
+    return nil
+  }
+
+  private func lastCodexAssistantText(records: [[String: JSONValue]]) -> (text: String, truncated: Bool)? {
+    guard !records.isEmpty else { return nil }
+    for record in records.reversed() {
+      if codexIsTurnBoundary(record) { break }
+      let text = codexAssistantText(record)
+      if !text.isEmpty {
+        return clampAssistantText(text)
+      }
+    }
+    return nil
+  }
+
+  private func codexAssistantText(_ record: [String: JSONValue]) -> String {
+    guard let payload = record["payload"]?.objectValue else { return "" }
+    if record.string("type") == "event_msg", payload.string("type") == "agent_message" {
+      return normalizeAssistantText(collectTextCandidates(payload).joined(separator: "\n\n"))
+    }
+    guard record.string("type") == "response_item" else { return "" }
+    let type = payload.string("type") ?? ""
+    if Self.skippedCodexResponseItemTypes.contains(type) { return "" }
+    let role = payload.string("role")?.lowercased() ?? ""
+    if !role.isEmpty, role != "assistant" { return "" }
+    guard Self.textCodexResponseItemTypes.contains(type) || role == "assistant" else { return "" }
+    return normalizeAssistantText(collectTextCandidates(payload).joined(separator: "\n\n"))
+  }
+
+  private func codexIsTurnBoundary(_ record: [String: JSONValue]) -> Bool {
+    guard let payload = record["payload"]?.objectValue else { return false }
+    if record.string("type") == "event_msg" {
+      return payload.string("type") == "task_started" || payload.string("type") == "user_message"
+    }
+    if record.string("type") == "response_item", payload.string("type") == "message" {
+      return payload.string("role")?.lowercased() == "user"
+    }
+    return false
+  }
+
+  private func codexThreadName(sessionId: String?) -> String? {
+    guard var id = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+    if id.hasPrefix("codex:") {
+      id = String(id.dropFirst("codex:".count))
+    }
+    let codexHome = environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let base = (codexHome?.isEmpty == false)
+      ? URL(fileURLWithPath: codexHome!)
+      : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
+    let indexURL = base.appendingPathComponent("session_index.jsonl")
+    guard let text = readTailText(indexURL, maxBytes: 512 * 1024) else { return nil }
+    var latest: String?
+    for line in text.components(separatedBy: CharacterSet.newlines) {
+      guard let data = line.data(using: .utf8),
+            case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: data),
+            object.string("id") == id,
+            let name = normalizedTitle(object.string("thread_name"))
+      else { continue }
+      latest = name
+    }
+    return latest
+  }
+
+  private func copilotWorkspaceTitle(sessionId: String?) -> String? {
+    guard let raw = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+    guard raw.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil,
+          raw.range(of: #"^\.+$"#, options: .regularExpression) == nil
+    else { return nil }
+    let home = environment["COPILOT_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let base = (home?.isEmpty == false)
+      ? URL(fileURLWithPath: home!)
+      : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".copilot", isDirectory: true)
+    let sessionState = base.appendingPathComponent("session-state", isDirectory: true)
+    let workspace = sessionState.appendingPathComponent(raw, isDirectory: true).appendingPathComponent("workspace.yaml")
+    guard workspace.standardizedFileURL.path.hasPrefix(sessionState.standardizedFileURL.path + "/"),
+          let text = readHeadText(workspace, maxBytes: 16 * 1024)
+    else { return nil }
+    return normalizedTitle(parseWorkspaceYamlName(text))
+  }
+
+  private func parseWorkspaceYamlName(_ text: String) -> String? {
+    for line in text.components(separatedBy: CharacterSet.newlines) {
+      guard let range = line.range(of: #"^name:\s*(.*?)\s*$"#, options: .regularExpression) else { continue }
+      var value = String(line[range]).replacingOccurrences(of: #"^name:\s*"#, with: "", options: .regularExpression)
+      if let first = value.first, first == "\"" || first == "'" {
+        if let close = value.dropFirst().firstIndex(of: first) {
+          value = String(value[value.index(after: value.startIndex)..<close])
+        }
+      } else if let comment = value.range(of: " #") {
+        value = String(value[..<comment.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+      }
+      let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty { return trimmed }
+    }
+    return nil
+  }
+
+  private func readTailText(_ url: URL, maxBytes: Int) -> String? {
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? handle.close() }
+    let fileSize = (try? handle.seekToEnd()) ?? 0
+    let readSize = min(UInt64(maxBytes), fileSize)
+    guard readSize > 0 else { return nil }
+    try? handle.seek(toOffset: fileSize - readSize)
+    let data = (try? handle.read(upToCount: Int(readSize))) ?? Data()
+    return String(data: data, encoding: .utf8)
+  }
+
+  private func readHeadText(_ url: URL, maxBytes: Int) -> String? {
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? handle.close() }
+    let data = (try? handle.read(upToCount: maxBytes)) ?? Data()
+    return String(data: data, encoding: .utf8)
+  }
+
+  private func assistantEntryMatchesSession(_ entry: [String: JSONValue], sessionId: String?) -> Bool {
+    guard let sessionId, !sessionId.isEmpty else { return true }
+    return entry.string("sessionId") == nil || entry.string("sessionId") == sessionId
+  }
+
+  private func assistantEntryLooksSubagent(_ entry: [String: JSONValue]) -> Bool {
+    entry.bool("isSidechain") == true
+      || entry.bool("isSubagent") == true
+      || entry.bool("is_subagent") == true
+      || entry.bool("subagent") == true
+  }
+
+  private func claudeAssistantEntryIsTurnBoundary(_ entry: [String: JSONValue], sessionId: String?) -> Bool {
+    entry.string("type") == "user" && assistantEntryMatchesSession(entry, sessionId: sessionId)
+  }
+
+  private func collectTextCandidates(_ object: [String: JSONValue]) -> [String] {
+    var candidates: [String] = []
+    for key in ["content", "text", "output_text", "message", "delta"] {
+      guard let value = object[key] else { continue }
+      candidates.append(contentsOf: textParts(from: value))
+      if let nested = value.objectValue {
+        candidates.append(contentsOf: collectTextCandidates(nested))
+      }
+    }
+    return candidates
+  }
+
+  private func textParts(from value: JSONValue?) -> [String] {
+    guard let value else { return [] }
+    switch value {
+    case .string(let string):
+      return [string]
+    case .array(let array):
+      return array.flatMap { item -> [String] in
+        if case .string(let string) = item { return [string] }
+        guard let block = item.objectValue else { return [] }
+        let type = block.string("type") ?? ""
+        if Self.skippedCodexResponseItemTypes.contains(type) || type == "tool_use" || type == "server_tool_use" {
+          return []
+        }
+        if (type == "text" || type == "output_text" || type.isEmpty), let text = block.string("text") {
+          return [text]
+        }
+        return []
+      }
+    case .object(let object):
+      return collectTextCandidates(object)
+    default:
+      return []
+    }
+  }
+
+  private func normalizeAssistantText(_ value: String) -> String {
+    value
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+      .components(separatedBy: CharacterSet(charactersIn: "\u{0000}\u{0001}\u{0002}\u{0003}\u{0004}\u{0005}\u{0006}\u{0007}\u{0008}\u{000b}\u{000c}\u{000e}\u{000f}\u{0010}\u{0011}\u{0012}\u{0013}\u{0014}\u{0015}\u{0016}\u{0017}\u{0018}\u{0019}\u{001a}\u{001b}\u{001c}\u{001d}\u{001e}\u{001f}\u{007f}"))
+      .joined(separator: " ")
+      .replacingOccurrences(of: #"[ \t]+\n"#, with: "\n", options: .regularExpression)
+      .replacingOccurrences(of: #"\n{4,}"#, with: "\n\n\n", options: .regularExpression)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func clampAssistantText(_ value: String, maxLength: Int = 2_200) -> (text: String, truncated: Bool)? {
+    let normalized = normalizeAssistantText(value)
+    guard !normalized.isEmpty else { return nil }
+    if normalized.count <= maxLength {
+      return (normalized, false)
+    }
+    let marker = "\n...[truncated]...\n"
+    let keep = maxLength - marker.count
+    guard keep > 20 else {
+      return (String(normalized.suffix(maxLength)), true)
+    }
+    let head = Int(ceil(Double(keep) / 2.0))
+    let tail = keep / 2
+    return ("\(normalized.prefix(head))\(marker)\(normalized.suffix(tail))", true)
   }
 
   private static func cap(_ value: JSONValue, depth: Int) -> JSONValue {
@@ -380,6 +717,33 @@ public struct NativeHookRuntime {
     "subagentStop": "working",
     "preCompact": "sweeping"
   ]
+
+  private static let skippedCodexResponseItemTypes: Set<String> = [
+    "function_call",
+    "function_call_output",
+    "custom_tool_call",
+    "custom_tool_call_output",
+    "web_search_call",
+    "reasoning",
+    "local_shell_call",
+    "tool_call",
+    "tool_result"
+  ]
+
+  private static let textCodexResponseItemTypes: Set<String> = [
+    "message",
+    "agent_message",
+    "assistant_message",
+    "output_text",
+    "text"
+  ]
+}
+
+private extension JSONValue {
+  var objectValue: [String: JSONValue]? {
+    if case .object(let value) = self { return value }
+    return nil
+  }
 }
 
 private extension [String: JSONValue] {

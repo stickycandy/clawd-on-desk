@@ -38,11 +38,93 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(body.string("tool_name"), "edit")
     XCTAssertNotNil(body["permission_suggestions"])
   }
+
+  func testClaudeTranscriptAddsTitleAndAssistantOutput() throws {
+    let fixture = try HookFixture()
+    let transcript = fixture.root.appendingPathComponent("claude.jsonl")
+    try """
+    {"type":"custom-title","title":"  Native Hook Migration  "}
+    {"type":"assistant","sessionId":"s1","message":{"content":[{"type":"text","text":"Done with the task"}]}}
+    """.write(to: transcript, atomically: true, encoding: .utf8)
+    let payload = Data(#"{"session_id":"s1","transcript_path":"\#(transcript.path)"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "claude-code", event: "Stop", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("session_title"), "Native Hook Migration")
+    XCTAssertEqual(body.string("assistant_last_output"), "Done with the task")
+  }
+
+  func testClaudeTranscriptApiErrorPromotesStopToError() throws {
+    let fixture = try HookFixture()
+    let transcript = fixture.root.appendingPathComponent("claude-error.jsonl")
+    try """
+    {"type":"assistant","sessionId":"s1","isApiErrorMessage":true,"api_error_type":"rate_limit","message":{"content":"rate limited"}}
+    """.write(to: transcript, atomically: true, encoding: .utf8)
+    let payload = Data(#"{"session_id":"s1","transcript_path":"\#(transcript.path)"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "claude-code", event: "Stop", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("state"), "error")
+    XCTAssertEqual(body.string("event"), "ApiError")
+    XCTAssertEqual(body.string("api_error_type"), "rate_limit")
+  }
+
+  func testCodexReadsThreadNameAndAssistantOutput() throws {
+    let fixture = try HookFixture()
+    let codexHome = fixture.root.appendingPathComponent("codex")
+    try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+    try #"{"id":"abc","thread_name":"Thread From Index"}"#
+      .write(to: codexHome.appendingPathComponent("session_index.jsonl"), atomically: true, encoding: .utf8)
+    let transcript = fixture.root.appendingPathComponent("codex.jsonl")
+    try """
+    {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Codex final answer"}]}}
+    """.write(to: transcript, atomically: true, encoding: .utf8)
+    let payload = Data(#"{"hook_event_name":"Stop","session_id":"abc","transcript_path":"\#(transcript.path)"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "codex", event: "Stop", environment: ["CODEX_HOME": codexHome.path]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("session_title"), "Thread From Index")
+    XCTAssertEqual(body.string("assistant_last_output"), "Codex final answer")
+  }
+
+  func testCopilotReadsWorkspaceTitle() throws {
+    let fixture = try HookFixture()
+    let copilotHome = fixture.root.appendingPathComponent("copilot")
+    let workspace = copilotHome
+      .appendingPathComponent("session-state", isDirectory: true)
+      .appendingPathComponent("s1", isDirectory: true)
+      .appendingPathComponent("workspace.yaml")
+    try FileManager.default.createDirectory(at: workspace.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "name: 'Renamed Workspace' # keep\n".write(to: workspace, atomically: true, encoding: .utf8)
+    let payload = Data(#"{"sessionId":"s1"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "copilot-cli", event: "sessionStart", environment: ["COPILOT_HOME": copilotHome.path]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("session_title"), "Renamed Workspace")
+  }
 }
 
 private extension [String: JSONValue] {
   func string(_ key: String) -> String? {
     if case .string(let value)? = self[key] { return value }
     return nil
+  }
+}
+
+private final class HookFixture {
+  let root: URL
+
+  init() throws {
+    root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("clawd-native-hook-tests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  }
+
+  deinit {
+    try? FileManager.default.removeItem(at: root)
   }
 }
