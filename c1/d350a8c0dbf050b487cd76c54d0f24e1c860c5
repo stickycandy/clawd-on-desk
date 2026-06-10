@@ -1,0 +1,15 @@
+native/Sources/ClawdNativeCore/NativeProcessResolver.swift
+  ai_agent 1-114
+native/Tests/ClawdNativeCoreTests/NativeProcessResolverTests.swift
+  ai_agent 1-31
+native/Sources/ClawdNativeCore/NativeHookRuntime.swift
+  ai_agent 76,79-80,85-96,138-140,144-150,205-206,260-272,277-291,356-638,720-746
+native/Tests/ClawdNativeCoreTests/NativeHookRuntimeTests.swift
+  ai_agent 41-108,117-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "c1d350a8c0dbf050b487cd76c54d0f24e1c860c5",
+  "prompts": {}
+}
