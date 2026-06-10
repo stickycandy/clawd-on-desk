@@ -47,6 +47,44 @@ final class ThemeRuntimeTests: XCTestCase {
     XCTAssertGreaterThan(hitBox.h, 0)
   }
 
+  func testVariantAndOverridesAffectResolvedAsset() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("clawd-native-theme-\(UUID().uuidString)", isDirectory: true)
+    let themeDir = root.appendingPathComponent("themes/test/assets", isDirectory: true)
+    try FileManager.default.createDirectory(at: themeDir, withIntermediateDirectories: true)
+    for file in ["idle.svg", "alt.svg", "override.svg", "work.svg", "think.svg"] {
+      FileManager.default.createFile(atPath: themeDir.appendingPathComponent(file).path, contents: Data("<svg></svg>".utf8))
+    }
+    let manifest = """
+    {
+      "name": "test",
+      "states": {
+        "idle": ["idle.svg"],
+        "working": ["work.svg"],
+        "thinking": ["think.svg"]
+      },
+      "variants": {
+        "alt": {
+          "states": {
+            "idle": ["alt.svg"]
+          }
+        }
+      }
+    }
+    """
+    try manifest.write(to: root.appendingPathComponent("themes/test/theme.json"), atomically: true, encoding: .utf8)
+    let runtime = ThemeRuntime(projectRoot: root)
+    let snapshot = StateSnapshot(currentState: .idle, sessions: [], updatedAt: Date())
+    XCTAssertEqual(runtime.resolveAsset(themeId: "test", snapshot: snapshot, variantId: "alt")?.fileName, "alt.svg")
+    let overrides: JSONValue = .object([
+      "states": .object([
+        "idle": .object(["file": .string("override.svg")])
+      ])
+    ])
+    XCTAssertEqual(runtime.resolveAsset(themeId: "test", snapshot: snapshot, variantId: "alt", overrides: overrides)?.fileName, "override.svg")
+    try? FileManager.default.removeItem(at: root)
+  }
+
   private func repoRoot() -> URL {
     var url = URL(fileURLWithPath: #filePath)
     for _ in 0..<4 {

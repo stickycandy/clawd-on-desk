@@ -93,12 +93,24 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
   public var platform: String?
   public var model: String?
   public var provider: String?
+  public var codexOriginator: String?
+  public var codexSource: String?
+  public var wtHwnd: String?
+  public var ghosttyTerminalId: String?
+  public var toolName: String?
+  public var toolUseId: String?
+  public var toolInputFingerprint: String?
   public var displayHint: String?
   public var sessionTitle: String?
   public var contextUsage: ContextUsage?
   public var assistantLastOutput: String?
   public var assistantLastOutputTruncated: Bool
   public var permissionSuspect: Bool
+  public var preserveState: Bool
+  public var backgroundTasksCount: Int
+  public var sessionCronsCount: Int
+  public var stopHookActive: Bool
+  public var transientPermissionEvent: Bool
   public var hookSource: String?
 
   public init(
@@ -113,12 +125,24 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     platform: String? = nil,
     model: String? = nil,
     provider: String? = nil,
+    codexOriginator: String? = nil,
+    codexSource: String? = nil,
+    wtHwnd: String? = nil,
+    ghosttyTerminalId: String? = nil,
+    toolName: String? = nil,
+    toolUseId: String? = nil,
+    toolInputFingerprint: String? = nil,
     displayHint: String? = nil,
     sessionTitle: String? = nil,
     contextUsage: ContextUsage? = nil,
     assistantLastOutput: String? = nil,
     assistantLastOutputTruncated: Bool = false,
     permissionSuspect: Bool = false,
+    preserveState: Bool = false,
+    backgroundTasksCount: Int = 0,
+    sessionCronsCount: Int = 0,
+    stopHookActive: Bool = false,
+    transientPermissionEvent: Bool = false,
     hookSource: String? = nil
   ) {
     self.sourcePid = sourcePid
@@ -132,12 +156,24 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     self.platform = platform
     self.model = model
     self.provider = provider
+    self.codexOriginator = codexOriginator
+    self.codexSource = codexSource
+    self.wtHwnd = wtHwnd
+    self.ghosttyTerminalId = ghosttyTerminalId
+    self.toolName = toolName
+    self.toolUseId = toolUseId
+    self.toolInputFingerprint = toolInputFingerprint
     self.displayHint = displayHint
     self.sessionTitle = sessionTitle
     self.contextUsage = contextUsage
     self.assistantLastOutput = assistantLastOutput
     self.assistantLastOutputTruncated = assistantLastOutputTruncated
     self.permissionSuspect = permissionSuspect
+    self.preserveState = preserveState
+    self.backgroundTasksCount = backgroundTasksCount
+    self.sessionCronsCount = sessionCronsCount
+    self.stopHookActive = stopHookActive
+    self.transientPermissionEvent = transientPermissionEvent
     self.hookSource = hookSource
   }
 }

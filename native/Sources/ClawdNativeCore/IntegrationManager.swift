@@ -29,6 +29,13 @@ public final class IntegrationManager: @unchecked Sendable {
     }
   }
 
+  public func repairAll(preferences: Preferences) -> [IntegrationResult] {
+    AgentRegistry.all.compactMap { descriptor in
+      guard AgentGate.isAgentEnabled(preferences, descriptor.id) else { return nil }
+      return repair(agentId: descriptor.id)
+    }
+  }
+
   public func repair(agentId: String) -> IntegrationResult {
     guard let descriptor = AgentRegistry.agent(agentId), let command = descriptor.installCommand else {
       return IntegrationResult(agentId: agentId, command: [], status: "skip", output: "No installer registered")
@@ -41,6 +48,10 @@ public final class IntegrationManager: @unchecked Sendable {
       return IntegrationResult(agentId: agentId, command: [], status: "skip", output: "No uninstaller registered")
     }
     return run(command, agentId: agentId)
+  }
+
+  public func cleanupAll() -> IntegrationResult {
+    run(["node", "hooks/cleanup-integrations.js", "--apply", "--silent", "--fail-open"], agentId: "all")
   }
 
   private func run(_ command: [String], agentId: String) -> IntegrationResult {

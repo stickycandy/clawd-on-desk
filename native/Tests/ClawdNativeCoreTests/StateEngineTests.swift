@@ -34,4 +34,18 @@ final class StateEngineTests: XCTestCase {
     XCTAssertEqual(engine.snapshot().sessions.count, 0)
     XCTAssertEqual(engine.current(), .idle)
   }
+
+  func testTransientPermissionEventPreservesSessionState() {
+    let engine = StateEngine()
+    engine.updateSession("s1", state: .working, event: "PreToolUse", metadata: SessionMetadata(agentId: "codex"))
+    engine.updateSession(
+      "s1",
+      state: .notification,
+      event: "PermissionRequest",
+      metadata: SessionMetadata(agentId: "codex", transientPermissionEvent: true)
+    )
+    let snapshot = engine.snapshot()
+    XCTAssertEqual(snapshot.sessions.first?.state, .working)
+    XCTAssertEqual(engine.current(), .notification)
+  }
 }

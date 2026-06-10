@@ -14,7 +14,10 @@ public final class TerminalFocusManager: @unchecked Sendable {
   public init() {}
 
   public func focus(session: AgentSession) -> TerminalFocusResult {
-    guard let pid = session.metadata.sourcePid ?? session.metadata.agentPid else {
+    if session.metadata.host != "local" {
+      return TerminalFocusResult(status: "skip", message: "Remote session focus should be opened through Remote SSH")
+    }
+    guard let pid = session.metadata.sourcePid ?? session.metadata.agentPid ?? session.metadata.pidChain?.first else {
       return TerminalFocusResult(status: "skip", message: "Session has no source PID")
     }
     return focus(pid: pid)

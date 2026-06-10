@@ -8,6 +8,8 @@ final class StatusMenuController: NSObject {
   private weak var settings: SettingsWindowController?
   private let preferencesStore: PreferencesStore?
   private let syncHandler: () -> Void
+  private let repairHandler: () -> Void
+  private let cleanupHandler: () -> Void
   private let updateHandler: () -> Void
   private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let dndItem = NSMenuItem(title: "Do Not Disturb", action: #selector(toggleDND), keyEquivalent: "")
@@ -20,6 +22,8 @@ final class StatusMenuController: NSObject {
     settings: SettingsWindowController?,
     preferencesStore: PreferencesStore? = nil,
     syncHandler: @escaping () -> Void,
+    repairHandler: @escaping () -> Void = {},
+    cleanupHandler: @escaping () -> Void = {},
     updateHandler: @escaping () -> Void = {}
   ) {
     self.stateEngine = stateEngine
@@ -27,6 +31,8 @@ final class StatusMenuController: NSObject {
     self.settings = settings
     self.preferencesStore = preferencesStore
     self.syncHandler = syncHandler
+    self.repairHandler = repairHandler
+    self.cleanupHandler = cleanupHandler
     self.updateHandler = updateHandler
     super.init()
     configure()
@@ -44,6 +50,8 @@ final class StatusMenuController: NSObject {
     miniItem.state = preferencesStore?.get().miniMode == true ? .on : .off
     menu.addItem(miniItem)
     menu.addItem(NSMenuItem(title: "Sync Integrations", action: #selector(syncIntegrations), keyEquivalent: ""))
+    menu.addItem(NSMenuItem(title: "Repair Enabled Integrations", action: #selector(repairIntegrations), keyEquivalent: ""))
+    menu.addItem(NSMenuItem(title: "Cleanup Managed Integrations", action: #selector(cleanupIntegrations), keyEquivalent: ""))
     menu.addItem(NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: ""))
     menu.addItem(NSMenuItem.separator())
     menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
@@ -90,6 +98,14 @@ final class StatusMenuController: NSObject {
 
   @objc private func syncIntegrations() {
     syncHandler()
+  }
+
+  @objc private func repairIntegrations() {
+    repairHandler()
+  }
+
+  @objc private func cleanupIntegrations() {
+    cleanupHandler()
   }
 
   @objc private func checkForUpdates() {

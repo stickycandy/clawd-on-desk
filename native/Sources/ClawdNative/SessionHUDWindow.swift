@@ -85,7 +85,20 @@ final class SessionHUDWindowController: NSWindowController {
 
   private func row(for session: AgentSession) -> NSView {
     let button = SessionButton()
-    button.title = "\(session.badge)  \(session.metadata.agentId)  \(session.metadata.sessionTitle ?? session.id)"
+    let prefs = preferences()
+    var parts = [session.badge, session.metadata.agentId]
+    if prefs.sessionHudShowStateLabels {
+      parts.append(session.state.rawValue)
+    }
+    if prefs.sessionHudShowElapsed {
+      let seconds = max(0, Int(Date().timeIntervalSince(session.startedAt)))
+      parts.append(seconds >= 60 ? "\(seconds / 60)m" : "\(seconds)s")
+    }
+    if prefs.sessionHudShowContextUsage, let percent = session.metadata.contextUsage?.percent {
+      parts.append("\(percent)%")
+    }
+    parts.append(session.metadata.sessionTitle ?? session.id)
+    button.title = parts.joined(separator: "  ")
     button.target = self
     button.action = #selector(focus(_:))
     button.bezelStyle = .inline

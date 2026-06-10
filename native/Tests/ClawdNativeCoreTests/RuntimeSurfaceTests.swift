@@ -157,4 +157,17 @@ final class RuntimeSurfaceTests: XCTestCase {
     XCTAssertTrue(html.contains("&lt;script&gt;"))
     XCTAssertFalse(html.contains("<script>"))
   }
+
+  func testPreferencesDecodeNewSchemaWithDefaultsAndRuntimeAutoApprove() throws {
+    let data = Data(#"{"theme":"calico","autoApproveAllPermissions":true}"#.utf8)
+    let prefs = try JSONDecoder().decode(Preferences.self, from: data).validated()
+    XCTAssertEqual(prefs.theme, "calico")
+    XCTAssertFalse(prefs.autoApproveAllPermissions)
+    XCTAssertEqual(prefs.shortcuts["togglePet"], "CommandOrControl+Shift+Alt+C")
+    XCTAssertEqual(prefs.hardwareBuddy.namePrefix, "Clawstick")
+
+    let encoded = try JSONEncoder().encode(Preferences(autoApproveAllPermissions: true))
+    let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+    XCTAssertNil(json?["autoApproveAllPermissions"])
+  }
 }

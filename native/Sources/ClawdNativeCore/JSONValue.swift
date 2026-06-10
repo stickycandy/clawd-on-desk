@@ -60,4 +60,21 @@ public enum JSONValue: Codable, Equatable, Sendable {
       return String(decoding: data, as: UTF8.self)
     }
   }
+
+  public var anyValue: Any {
+    switch self {
+    case .string(let value):
+      return value
+    case .number(let value):
+      return value
+    case .bool(let value):
+      return value
+    case .object(let value):
+      return value.mapValues { $0.anyValue }
+    case .array(let value):
+      return value.map { $0.anyValue }
+    case .null:
+      return NSNull()
+    }
+  }
 }

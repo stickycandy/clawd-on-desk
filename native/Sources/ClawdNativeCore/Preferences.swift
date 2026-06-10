@@ -25,6 +25,28 @@ public struct AgentSettings: Codable, Equatable, Sendable {
   }
 }
 
+public struct HardwareBuddySettings: Codable, Equatable, Sendable {
+  public var enabled: Bool
+  public var permissionsEnabled: Bool
+  public var quickCommandsEnabled: Bool
+  public var deviceAddress: String?
+  public var namePrefix: String
+
+  public init(
+    enabled: Bool = false,
+    permissionsEnabled: Bool = false,
+    quickCommandsEnabled: Bool = false,
+    deviceAddress: String? = nil,
+    namePrefix: String = "Clawstick"
+  ) {
+    self.enabled = enabled
+    self.permissionsEnabled = permissionsEnabled
+    self.quickCommandsEnabled = quickCommandsEnabled
+    self.deviceAddress = deviceAddress
+    self.namePrefix = namePrefix
+  }
+}
+
 public struct RemoteSSHProfile: Codable, Equatable, Identifiable, Sendable {
   public var id: String
   public var label: String
@@ -144,6 +166,11 @@ public struct Preferences: Codable, Equatable, Sendable {
   public var x: Double
   public var y: Double
   public var positionSaved: Bool
+  public var positionThemeId: String
+  public var positionVariantId: String
+  public var positionDisplay: JSONValue?
+  public var savedPixelWidth: Double
+  public var savedPixelHeight: Double
   public var size: String
   public var miniMode: Bool
   public var miniEdge: String
@@ -155,6 +182,7 @@ public struct Preferences: Codable, Equatable, Sendable {
   public var manageClaudeHooksAutomatically: Bool
   public var autoStartWithClaude: Bool
   public var openAtLogin: Bool
+  public var openAtLoginHydrated: Bool
   public var bubbleFollowPet: Bool
   public var sessionHudEnabled: Bool
   public var sessionHudShowStateLabels: Bool
@@ -167,29 +195,42 @@ public struct Preferences: Codable, Equatable, Sendable {
   public var detachedIdleStaleMs: Int
   public var hideBubbles: Bool
   public var permissionBubblesEnabled: Bool
+  public var autoApproveAllPermissions: Bool
   public var notificationBubbleAutoCloseSeconds: Int
   public var permissionBubbleAutoCloseSeconds: Int
   public var updateBubbleAutoCloseSeconds: Int
   public var soundMuted: Bool
   public var soundVolume: Double
   public var flashTaskbarOnComplete: Bool
+  public var flashIntervalMs: Int
+  public var flashDurationMs: Int
   public var lowPowerIdleMode: Bool
   public var mobilePreviewEnabled: Bool
   public var keepAwakeWhileWorking: Bool
   public var allowEdgePinning: Bool
   public var disableMiniMode: Bool
   public var keepSizeAcrossDisplays: Bool
+  public var shortcuts: [String: String]
   public var theme: String
+  public var themeOverrides: [String: JSONValue]
+  public var themeVariant: [String: String]
   public var agents: [String: AgentSettings]
   public var sessionAliases: [String: SessionAlias]
   public var remoteSshProfiles: [RemoteSSHProfile]
   public var telegramApproval: TelegramApprovalConfig
+  public var telegramMigration: JSONValue?
+  public var hardwareBuddy: HardwareBuddySettings
 
   public init(
     version: Int = 1,
     x: Double = 0,
     y: Double = 0,
     positionSaved: Bool = false,
+    positionThemeId: String = "",
+    positionVariantId: String = "",
+    positionDisplay: JSONValue? = nil,
+    savedPixelWidth: Double = 0,
+    savedPixelHeight: Double = 0,
     size: String = "P:9",
     miniMode: Bool = false,
     miniEdge: String = "right",
@@ -201,6 +242,7 @@ public struct Preferences: Codable, Equatable, Sendable {
     manageClaudeHooksAutomatically: Bool = true,
     autoStartWithClaude: Bool = false,
     openAtLogin: Bool = false,
+    openAtLoginHydrated: Bool = false,
     bubbleFollowPet: Bool = false,
     sessionHudEnabled: Bool = true,
     sessionHudShowStateLabels: Bool = true,
@@ -213,28 +255,41 @@ public struct Preferences: Codable, Equatable, Sendable {
     detachedIdleStaleMs: Int = 30_000,
     hideBubbles: Bool = false,
     permissionBubblesEnabled: Bool = true,
+    autoApproveAllPermissions: Bool = false,
     notificationBubbleAutoCloseSeconds: Int = 30,
     permissionBubbleAutoCloseSeconds: Int = 0,
     updateBubbleAutoCloseSeconds: Int = 12,
     soundMuted: Bool = false,
     soundVolume: Double = 1,
     flashTaskbarOnComplete: Bool = true,
+    flashIntervalMs: Int = 500,
+    flashDurationMs: Int = 5_000,
     lowPowerIdleMode: Bool = false,
     mobilePreviewEnabled: Bool = false,
     keepAwakeWhileWorking: Bool = false,
     allowEdgePinning: Bool = false,
     disableMiniMode: Bool = false,
     keepSizeAcrossDisplays: Bool = false,
+    shortcuts: [String: String] = Preferences.defaultShortcuts(),
     theme: String = "clawd",
+    themeOverrides: [String: JSONValue] = [:],
+    themeVariant: [String: String] = [:],
     agents: [String: AgentSettings] = Preferences.defaultAgents(),
     sessionAliases: [String: SessionAlias] = [:],
     remoteSshProfiles: [RemoteSSHProfile] = [],
-    telegramApproval: TelegramApprovalConfig = TelegramApprovalConfig()
+    telegramApproval: TelegramApprovalConfig = TelegramApprovalConfig(),
+    telegramMigration: JSONValue? = nil,
+    hardwareBuddy: HardwareBuddySettings = HardwareBuddySettings()
   ) {
     self.version = version
     self.x = x
     self.y = y
     self.positionSaved = positionSaved
+    self.positionThemeId = positionThemeId
+    self.positionVariantId = positionVariantId
+    self.positionDisplay = positionDisplay
+    self.savedPixelWidth = savedPixelWidth
+    self.savedPixelHeight = savedPixelHeight
     self.size = size
     self.miniMode = miniMode
     self.miniEdge = miniEdge
@@ -246,6 +301,7 @@ public struct Preferences: Codable, Equatable, Sendable {
     self.manageClaudeHooksAutomatically = manageClaudeHooksAutomatically
     self.autoStartWithClaude = autoStartWithClaude
     self.openAtLogin = openAtLogin
+    self.openAtLoginHydrated = openAtLoginHydrated
     self.bubbleFollowPet = bubbleFollowPet
     self.sessionHudEnabled = sessionHudEnabled
     self.sessionHudShowStateLabels = sessionHudShowStateLabels
@@ -258,23 +314,173 @@ public struct Preferences: Codable, Equatable, Sendable {
     self.detachedIdleStaleMs = detachedIdleStaleMs
     self.hideBubbles = hideBubbles
     self.permissionBubblesEnabled = permissionBubblesEnabled
+    self.autoApproveAllPermissions = autoApproveAllPermissions
     self.notificationBubbleAutoCloseSeconds = notificationBubbleAutoCloseSeconds
     self.permissionBubbleAutoCloseSeconds = permissionBubbleAutoCloseSeconds
     self.updateBubbleAutoCloseSeconds = updateBubbleAutoCloseSeconds
     self.soundMuted = soundMuted
     self.soundVolume = soundVolume
     self.flashTaskbarOnComplete = flashTaskbarOnComplete
+    self.flashIntervalMs = flashIntervalMs
+    self.flashDurationMs = flashDurationMs
     self.lowPowerIdleMode = lowPowerIdleMode
     self.mobilePreviewEnabled = mobilePreviewEnabled
     self.keepAwakeWhileWorking = keepAwakeWhileWorking
     self.allowEdgePinning = allowEdgePinning
     self.disableMiniMode = disableMiniMode
     self.keepSizeAcrossDisplays = keepSizeAcrossDisplays
+    self.shortcuts = shortcuts
     self.theme = theme
+    self.themeOverrides = themeOverrides
+    self.themeVariant = themeVariant
     self.agents = agents
     self.sessionAliases = sessionAliases
     self.remoteSshProfiles = remoteSshProfiles
     self.telegramApproval = telegramApproval
+    self.telegramMigration = telegramMigration
+    self.hardwareBuddy = hardwareBuddy
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case version, x, y, positionSaved, positionThemeId, positionVariantId, positionDisplay
+    case savedPixelWidth, savedPixelHeight, size, miniMode, miniEdge, preMiniX, preMiniY
+    case lang, showTray, showDock, manageClaudeHooksAutomatically, autoStartWithClaude
+    case openAtLogin, openAtLoginHydrated, bubbleFollowPet
+    case sessionHudEnabled, sessionHudShowStateLabels, sessionHudShowElapsed, sessionHudShowContextUsage
+    case sessionHudCleanupDetached, sessionHudPinned, sessionStaleMs, workingStaleMs, detachedIdleStaleMs
+    case hideBubbles, permissionBubblesEnabled, autoApproveAllPermissions
+    case notificationBubbleAutoCloseSeconds, permissionBubbleAutoCloseSeconds, updateBubbleAutoCloseSeconds
+    case soundMuted, soundVolume, flashTaskbarOnComplete, flashIntervalMs, flashDurationMs
+    case lowPowerIdleMode, mobilePreviewEnabled, keepAwakeWhileWorking, allowEdgePinning
+    case disableMiniMode, keepSizeAcrossDisplays, shortcuts, theme, themeOverrides, themeVariant
+    case agents, sessionAliases, remoteSshProfiles, telegramApproval, telegramMigration, hardwareBuddy
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let defaults = Preferences()
+    self.init(
+      version: try container.decodeIfPresent(Int.self, forKey: .version) ?? defaults.version,
+      x: try container.decodeIfPresent(Double.self, forKey: .x) ?? defaults.x,
+      y: try container.decodeIfPresent(Double.self, forKey: .y) ?? defaults.y,
+      positionSaved: try container.decodeIfPresent(Bool.self, forKey: .positionSaved) ?? defaults.positionSaved,
+      positionThemeId: try container.decodeIfPresent(String.self, forKey: .positionThemeId) ?? defaults.positionThemeId,
+      positionVariantId: try container.decodeIfPresent(String.self, forKey: .positionVariantId) ?? defaults.positionVariantId,
+      positionDisplay: try container.decodeIfPresent(JSONValue.self, forKey: .positionDisplay),
+      savedPixelWidth: try container.decodeIfPresent(Double.self, forKey: .savedPixelWidth) ?? defaults.savedPixelWidth,
+      savedPixelHeight: try container.decodeIfPresent(Double.self, forKey: .savedPixelHeight) ?? defaults.savedPixelHeight,
+      size: try container.decodeIfPresent(String.self, forKey: .size) ?? defaults.size,
+      miniMode: try container.decodeIfPresent(Bool.self, forKey: .miniMode) ?? defaults.miniMode,
+      miniEdge: try container.decodeIfPresent(String.self, forKey: .miniEdge) ?? defaults.miniEdge,
+      preMiniX: try container.decodeIfPresent(Double.self, forKey: .preMiniX),
+      preMiniY: try container.decodeIfPresent(Double.self, forKey: .preMiniY),
+      lang: try container.decodeIfPresent(String.self, forKey: .lang) ?? defaults.lang,
+      showTray: try container.decodeIfPresent(Bool.self, forKey: .showTray) ?? defaults.showTray,
+      showDock: try container.decodeIfPresent(Bool.self, forKey: .showDock) ?? defaults.showDock,
+      manageClaudeHooksAutomatically: try container.decodeIfPresent(Bool.self, forKey: .manageClaudeHooksAutomatically) ?? defaults.manageClaudeHooksAutomatically,
+      autoStartWithClaude: try container.decodeIfPresent(Bool.self, forKey: .autoStartWithClaude) ?? defaults.autoStartWithClaude,
+      openAtLogin: try container.decodeIfPresent(Bool.self, forKey: .openAtLogin) ?? defaults.openAtLogin,
+      openAtLoginHydrated: try container.decodeIfPresent(Bool.self, forKey: .openAtLoginHydrated) ?? defaults.openAtLoginHydrated,
+      bubbleFollowPet: try container.decodeIfPresent(Bool.self, forKey: .bubbleFollowPet) ?? defaults.bubbleFollowPet,
+      sessionHudEnabled: try container.decodeIfPresent(Bool.self, forKey: .sessionHudEnabled) ?? defaults.sessionHudEnabled,
+      sessionHudShowStateLabels: try container.decodeIfPresent(Bool.self, forKey: .sessionHudShowStateLabels) ?? defaults.sessionHudShowStateLabels,
+      sessionHudShowElapsed: try container.decodeIfPresent(Bool.self, forKey: .sessionHudShowElapsed) ?? defaults.sessionHudShowElapsed,
+      sessionHudShowContextUsage: try container.decodeIfPresent(Bool.self, forKey: .sessionHudShowContextUsage) ?? defaults.sessionHudShowContextUsage,
+      sessionHudCleanupDetached: try container.decodeIfPresent(Bool.self, forKey: .sessionHudCleanupDetached) ?? defaults.sessionHudCleanupDetached,
+      sessionHudPinned: try container.decodeIfPresent(Bool.self, forKey: .sessionHudPinned) ?? defaults.sessionHudPinned,
+      sessionStaleMs: try container.decodeIfPresent(Int.self, forKey: .sessionStaleMs) ?? defaults.sessionStaleMs,
+      workingStaleMs: try container.decodeIfPresent(Int.self, forKey: .workingStaleMs) ?? defaults.workingStaleMs,
+      detachedIdleStaleMs: try container.decodeIfPresent(Int.self, forKey: .detachedIdleStaleMs) ?? defaults.detachedIdleStaleMs,
+      hideBubbles: try container.decodeIfPresent(Bool.self, forKey: .hideBubbles) ?? defaults.hideBubbles,
+      permissionBubblesEnabled: try container.decodeIfPresent(Bool.self, forKey: .permissionBubblesEnabled) ?? defaults.permissionBubblesEnabled,
+      autoApproveAllPermissions: defaults.autoApproveAllPermissions,
+      notificationBubbleAutoCloseSeconds: try container.decodeIfPresent(Int.self, forKey: .notificationBubbleAutoCloseSeconds) ?? defaults.notificationBubbleAutoCloseSeconds,
+      permissionBubbleAutoCloseSeconds: try container.decodeIfPresent(Int.self, forKey: .permissionBubbleAutoCloseSeconds) ?? defaults.permissionBubbleAutoCloseSeconds,
+      updateBubbleAutoCloseSeconds: try container.decodeIfPresent(Int.self, forKey: .updateBubbleAutoCloseSeconds) ?? defaults.updateBubbleAutoCloseSeconds,
+      soundMuted: try container.decodeIfPresent(Bool.self, forKey: .soundMuted) ?? defaults.soundMuted,
+      soundVolume: try container.decodeIfPresent(Double.self, forKey: .soundVolume) ?? defaults.soundVolume,
+      flashTaskbarOnComplete: try container.decodeIfPresent(Bool.self, forKey: .flashTaskbarOnComplete) ?? defaults.flashTaskbarOnComplete,
+      flashIntervalMs: try container.decodeIfPresent(Int.self, forKey: .flashIntervalMs) ?? defaults.flashIntervalMs,
+      flashDurationMs: try container.decodeIfPresent(Int.self, forKey: .flashDurationMs) ?? defaults.flashDurationMs,
+      lowPowerIdleMode: try container.decodeIfPresent(Bool.self, forKey: .lowPowerIdleMode) ?? defaults.lowPowerIdleMode,
+      mobilePreviewEnabled: try container.decodeIfPresent(Bool.self, forKey: .mobilePreviewEnabled) ?? defaults.mobilePreviewEnabled,
+      keepAwakeWhileWorking: try container.decodeIfPresent(Bool.self, forKey: .keepAwakeWhileWorking) ?? defaults.keepAwakeWhileWorking,
+      allowEdgePinning: try container.decodeIfPresent(Bool.self, forKey: .allowEdgePinning) ?? defaults.allowEdgePinning,
+      disableMiniMode: try container.decodeIfPresent(Bool.self, forKey: .disableMiniMode) ?? defaults.disableMiniMode,
+      keepSizeAcrossDisplays: try container.decodeIfPresent(Bool.self, forKey: .keepSizeAcrossDisplays) ?? defaults.keepSizeAcrossDisplays,
+      shortcuts: try container.decodeIfPresent([String: String].self, forKey: .shortcuts) ?? defaults.shortcuts,
+      theme: try container.decodeIfPresent(String.self, forKey: .theme) ?? defaults.theme,
+      themeOverrides: try container.decodeIfPresent([String: JSONValue].self, forKey: .themeOverrides) ?? defaults.themeOverrides,
+      themeVariant: try container.decodeIfPresent([String: String].self, forKey: .themeVariant) ?? defaults.themeVariant,
+      agents: try container.decodeIfPresent([String: AgentSettings].self, forKey: .agents) ?? defaults.agents,
+      sessionAliases: try container.decodeIfPresent([String: SessionAlias].self, forKey: .sessionAliases) ?? defaults.sessionAliases,
+      remoteSshProfiles: try container.decodeIfPresent([RemoteSSHProfile].self, forKey: .remoteSshProfiles) ?? defaults.remoteSshProfiles,
+      telegramApproval: try container.decodeIfPresent(TelegramApprovalConfig.self, forKey: .telegramApproval) ?? defaults.telegramApproval,
+      telegramMigration: try container.decodeIfPresent(JSONValue.self, forKey: .telegramMigration),
+      hardwareBuddy: try container.decodeIfPresent(HardwareBuddySettings.self, forKey: .hardwareBuddy) ?? defaults.hardwareBuddy
+    )
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(version, forKey: .version)
+    try container.encode(x, forKey: .x)
+    try container.encode(y, forKey: .y)
+    try container.encode(positionSaved, forKey: .positionSaved)
+    try container.encode(positionThemeId, forKey: .positionThemeId)
+    try container.encode(positionVariantId, forKey: .positionVariantId)
+    try container.encodeIfPresent(positionDisplay, forKey: .positionDisplay)
+    try container.encode(savedPixelWidth, forKey: .savedPixelWidth)
+    try container.encode(savedPixelHeight, forKey: .savedPixelHeight)
+    try container.encode(size, forKey: .size)
+    try container.encode(miniMode, forKey: .miniMode)
+    try container.encode(miniEdge, forKey: .miniEdge)
+    try container.encodeIfPresent(preMiniX, forKey: .preMiniX)
+    try container.encodeIfPresent(preMiniY, forKey: .preMiniY)
+    try container.encode(lang, forKey: .lang)
+    try container.encode(showTray, forKey: .showTray)
+    try container.encode(showDock, forKey: .showDock)
+    try container.encode(manageClaudeHooksAutomatically, forKey: .manageClaudeHooksAutomatically)
+    try container.encode(autoStartWithClaude, forKey: .autoStartWithClaude)
+    try container.encode(openAtLogin, forKey: .openAtLogin)
+    try container.encode(openAtLoginHydrated, forKey: .openAtLoginHydrated)
+    try container.encode(bubbleFollowPet, forKey: .bubbleFollowPet)
+    try container.encode(sessionHudEnabled, forKey: .sessionHudEnabled)
+    try container.encode(sessionHudShowStateLabels, forKey: .sessionHudShowStateLabels)
+    try container.encode(sessionHudShowElapsed, forKey: .sessionHudShowElapsed)
+    try container.encode(sessionHudShowContextUsage, forKey: .sessionHudShowContextUsage)
+    try container.encode(sessionHudCleanupDetached, forKey: .sessionHudCleanupDetached)
+    try container.encode(sessionHudPinned, forKey: .sessionHudPinned)
+    try container.encode(sessionStaleMs, forKey: .sessionStaleMs)
+    try container.encode(workingStaleMs, forKey: .workingStaleMs)
+    try container.encode(detachedIdleStaleMs, forKey: .detachedIdleStaleMs)
+    try container.encode(hideBubbles, forKey: .hideBubbles)
+    try container.encode(permissionBubblesEnabled, forKey: .permissionBubblesEnabled)
+    try container.encode(notificationBubbleAutoCloseSeconds, forKey: .notificationBubbleAutoCloseSeconds)
+    try container.encode(permissionBubbleAutoCloseSeconds, forKey: .permissionBubbleAutoCloseSeconds)
+    try container.encode(updateBubbleAutoCloseSeconds, forKey: .updateBubbleAutoCloseSeconds)
+    try container.encode(soundMuted, forKey: .soundMuted)
+    try container.encode(soundVolume, forKey: .soundVolume)
+    try container.encode(flashTaskbarOnComplete, forKey: .flashTaskbarOnComplete)
+    try container.encode(flashIntervalMs, forKey: .flashIntervalMs)
+    try container.encode(flashDurationMs, forKey: .flashDurationMs)
+    try container.encode(lowPowerIdleMode, forKey: .lowPowerIdleMode)
+    try container.encode(mobilePreviewEnabled, forKey: .mobilePreviewEnabled)
+    try container.encode(keepAwakeWhileWorking, forKey: .keepAwakeWhileWorking)
+    try container.encode(allowEdgePinning, forKey: .allowEdgePinning)
+    try container.encode(disableMiniMode, forKey: .disableMiniMode)
+    try container.encode(keepSizeAcrossDisplays, forKey: .keepSizeAcrossDisplays)
+    try container.encode(shortcuts, forKey: .shortcuts)
+    try container.encode(theme, forKey: .theme)
+    try container.encode(themeOverrides, forKey: .themeOverrides)
+    try container.encode(themeVariant, forKey: .themeVariant)
+    try container.encode(agents, forKey: .agents)
+    try container.encode(sessionAliases, forKey: .sessionAliases)
+    try container.encode(remoteSshProfiles, forKey: .remoteSshProfiles)
+    try container.encode(telegramApproval, forKey: .telegramApproval)
+    try container.encodeIfPresent(telegramMigration, forKey: .telegramMigration)
+    try container.encode(hardwareBuddy, forKey: .hardwareBuddy)
+    // autoApproveAllPermissions is intentionally runtime-only.
   }
 
   public static func defaultAgents() -> [String: AgentSettings] {
@@ -297,6 +503,14 @@ public struct Preferences: Codable, Equatable, Sendable {
     ]
   }
 
+  public static func defaultShortcuts() -> [String: String] {
+    [
+      "togglePet": "CommandOrControl+Shift+Alt+C",
+      "permissionAllow": "CommandOrControl+Shift+Y",
+      "permissionDeny": "CommandOrControl+Shift+N"
+    ]
+  }
+
   public func validated() -> Preferences {
     var copy = self
     if !["en", "zh", "zh-TW", "ko", "ja"].contains(copy.lang) { copy.lang = "en" }
@@ -306,14 +520,36 @@ public struct Preferences: Codable, Equatable, Sendable {
     copy.workingStaleMs = min(max(copy.workingStaleMs, 30_000), 86_400_000)
     copy.detachedIdleStaleMs = min(max(copy.detachedIdleStaleMs, 5_000), 300_000)
     copy.soundVolume = min(max(copy.soundVolume, 0), 1)
+    copy.savedPixelWidth = max(copy.savedPixelWidth, 0)
+    copy.savedPixelHeight = max(copy.savedPixelHeight, 0)
     copy.notificationBubbleAutoCloseSeconds = min(max(copy.notificationBubbleAutoCloseSeconds, 0), 600)
     copy.permissionBubbleAutoCloseSeconds = min(max(copy.permissionBubbleAutoCloseSeconds, 0), 600)
     copy.updateBubbleAutoCloseSeconds = min(max(copy.updateBubbleAutoCloseSeconds, 0), 600)
+    copy.flashIntervalMs = min(max(copy.flashIntervalMs, 200), 2_000)
+    copy.flashDurationMs = min(max(copy.flashDurationMs, 0), 60_000)
+    copy.shortcuts = Preferences.normalizeShortcuts(copy.shortcuts)
+    copy.themeVariant = copy.themeVariant.filter { !$0.key.isEmpty && !$0.value.isEmpty }
     copy.remoteSshProfiles = RemoteSSHProfileValidator.sanitize(copy.remoteSshProfiles)
+    copy.hardwareBuddy.namePrefix = copy.hardwareBuddy.namePrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+    if copy.hardwareBuddy.namePrefix.isEmpty { copy.hardwareBuddy.namePrefix = "Clawstick" }
+    copy.hardwareBuddy.deviceAddress = copy.hardwareBuddy.deviceAddress?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     for descriptor in AgentRegistry.all where copy.agents[descriptor.id] == nil {
       copy.agents[descriptor.id] = Preferences.defaultAgents()[descriptor.id] ?? AgentSettings()
     }
     return copy
+  }
+
+  private static func normalizeShortcuts(_ value: [String: String]) -> [String: String] {
+    var out = defaultShortcuts()
+    for (key, accelerator) in value where out.keys.contains(key) {
+      let trimmed = accelerator.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.isEmpty {
+        out[key] = ""
+      } else if trimmed.contains("+") {
+        out[key] = trimmed
+      }
+    }
+    return out
   }
 }
 

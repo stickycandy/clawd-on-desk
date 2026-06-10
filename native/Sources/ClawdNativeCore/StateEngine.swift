@@ -108,15 +108,19 @@ public final class StateEngine: @unchecked Sendable {
     let sid = trimmed.isEmpty ? "default" : trimmed
     publish {
       let now = Date()
-      var recent = sessionsById[sid]?.recentEvents ?? []
+      let existing = sessionsById[sid]
+      var recent = existing?.recentEvents ?? []
       if let event, !event.isEmpty {
         recent.append(event)
         if recent.count > 8 { recent.removeFirst(recent.count - 8) }
       }
-      let startedAt = sessionsById[sid]?.startedAt ?? now
+      let startedAt = existing?.startedAt ?? now
+      let storedState = (metadata.preserveState || metadata.transientPermissionEvent)
+        ? (existing?.state ?? state)
+        : state
       sessionsById[sid] = AgentSession(
         id: sid,
-        state: state,
+        state: storedState,
         event: event,
         updatedAt: now,
         startedAt: startedAt,
@@ -126,7 +130,11 @@ public final class StateEngine: @unchecked Sendable {
       if event == "SessionEnd" || state == .sleeping || state == .miniSleep {
         sessionsById[sid]?.state = state
       }
-      recomputeLocked(force: false)
+      if metadata.transientPermissionEvent {
+        setStateLocked(.notification, force: false)
+      } else {
+        recomputeLocked(force: false)
+      }
     }
   }
 

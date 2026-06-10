@@ -65,6 +65,11 @@ final class PetWindowController: NSWindowController {
       prefs.x = frame.origin.x
       prefs.y = frame.origin.y
       prefs.positionSaved = true
+      prefs.savedPixelWidth = frame.width
+      prefs.savedPixelHeight = frame.height
+      prefs.positionThemeId = prefs.theme
+      prefs.positionVariantId = prefs.themeVariant[prefs.theme] ?? "default"
+      prefs.positionDisplay = Self.displaySnapshot(window?.screen)
     }
   }
 
@@ -98,7 +103,7 @@ final class PetWindowController: NSWindowController {
     } else if prefs.positionSaved {
       origin = NSPoint(x: prefs.x, y: prefs.y)
     }
-    let frame = NSRect(origin: origin, size: targetSize)
+    let frame = clamp(NSRect(origin: origin, size: targetSize), visible: visible, allowEdgePinning: prefs.allowEdgePinning || mini)
     applyingPreferenceFrame = true
     if animated {
       NSAnimationContext.runAnimationGroup { context in
@@ -122,6 +127,42 @@ final class PetWindowController: NSWindowController {
       x: screen.visibleFrame.maxX - 240,
       y: screen.visibleFrame.minY + 120
     )
+  }
+
+  private func clamp(_ frame: NSRect, visible: NSRect, allowEdgePinning: Bool) -> NSRect {
+    let margin: CGFloat = allowEdgePinning ? min(frame.width, frame.height) * 0.45 : 8
+    let minX = visible.minX + (allowEdgePinning ? -frame.width + margin : 8)
+    let maxX = visible.maxX - (allowEdgePinning ? margin : frame.width + 8)
+    let minY = visible.minY + (allowEdgePinning ? -frame.height + margin : 8)
+    let maxY = visible.maxY - (allowEdgePinning ? margin : frame.height + 8)
+    return NSRect(
+      x: min(max(frame.origin.x, minX), maxX),
+      y: min(max(frame.origin.y, minY), maxY),
+      width: frame.width,
+      height: frame.height
+    )
+  }
+
+  private static func displaySnapshot(_ screen: NSScreen?) -> JSONValue? {
+    guard let screen else { return nil }
+    let frame = screen.frame
+    let visible = screen.visibleFrame
+    return .object([
+      "id": .number(Double(screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 ?? 0)),
+      "scaleFactor": .number(Double(screen.backingScaleFactor)),
+      "bounds": .object([
+        "x": .number(Double(frame.origin.x)),
+        "y": .number(Double(frame.origin.y)),
+        "width": .number(Double(frame.width)),
+        "height": .number(Double(frame.height))
+      ]),
+      "workArea": .object([
+        "x": .number(Double(visible.origin.x)),
+        "y": .number(Double(visible.origin.y)),
+        "width": .number(Double(visible.width)),
+        "height": .number(Double(visible.height))
+      ])
+    ])
   }
 }
 

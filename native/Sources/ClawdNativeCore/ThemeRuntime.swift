@@ -35,43 +35,43 @@ public final class ThemeRuntime: @unchecked Sendable {
     self.fileManager = fileManager
   }
 
-  public func loadTheme(id: String) throws -> LoadedTheme {
+  public func loadTheme(id: String, variantId: String = "default", overrides: JSONValue? = nil) throws -> LoadedTheme {
     let safeId = id.lastPathComponent
     let builtInURL = projectRoot
       .appendingPathComponent("themes", isDirectory: true)
       .appendingPathComponent(safeId, isDirectory: true)
       .appendingPathComponent("theme.json")
     if fileManager.fileExists(atPath: builtInURL.path) {
-      let manifest = try ThemeManifest.load(from: builtInURL)
-      return LoadedTheme(id: safeId, manifest: manifest, themeDirectory: builtInURL.deletingLastPathComponent(), isBuiltIn: true, projectRoot: projectRoot)
+      let manifest = try ThemeManifest.load(from: builtInURL, variantId: variantId, overrides: overrides)
+      return LoadedTheme(id: safeId, variantId: variantId, manifest: manifest, themeDirectory: builtInURL.deletingLastPathComponent(), isBuiltIn: true, projectRoot: projectRoot)
     }
 
     let userURL = userThemesRoot
       .appendingPathComponent(safeId, isDirectory: true)
       .appendingPathComponent("theme.json")
     if fileManager.fileExists(atPath: userURL.path) {
-      let manifest = try ThemeManifest.load(from: userURL)
-      return LoadedTheme(id: safeId, manifest: manifest, themeDirectory: userURL.deletingLastPathComponent(), isBuiltIn: false, projectRoot: projectRoot)
+      let manifest = try ThemeManifest.load(from: userURL, variantId: variantId, overrides: overrides)
+      return LoadedTheme(id: safeId, variantId: variantId, manifest: manifest, themeDirectory: userURL.deletingLastPathComponent(), isBuiltIn: false, projectRoot: projectRoot)
     }
 
     if safeId != "clawd" {
-      return try loadTheme(id: "clawd")
+      return try loadTheme(id: "clawd", variantId: variantId, overrides: overrides)
     }
     throw ThemeRuntimeError.themeNotFound(id)
   }
 
-  public func resolveAsset(themeId: String, snapshot: StateSnapshot) -> ThemeAsset? {
-    guard let loaded = try? loadTheme(id: themeId) else { return nil }
+  public func resolveAsset(themeId: String, snapshot: StateSnapshot, variantId: String = "default", overrides: JSONValue? = nil) -> ThemeAsset? {
+    guard let loaded = try? loadTheme(id: themeId, variantId: variantId, overrides: overrides) else { return nil }
     return loaded.resolveAsset(snapshot: snapshot)
   }
 
-  public func resolveAsset(themeId: String, fileName: String, state: ClawdState) -> ThemeAsset? {
-    guard let loaded = try? loadTheme(id: themeId), loaded.assetExists(fileName) else { return nil }
+  public func resolveAsset(themeId: String, fileName: String, state: ClawdState, variantId: String = "default", overrides: JSONValue? = nil) -> ThemeAsset? {
+    guard let loaded = try? loadTheme(id: themeId, variantId: variantId, overrides: overrides), loaded.assetExists(fileName) else { return nil }
     return loaded.makeAsset(fileName: fileName.lastPathComponent, state: state)
   }
 
-  public func resolveReactionAsset(themeId: String, reaction: String, side: String? = nil) -> (asset: ThemeAsset, durationMs: Int?)? {
-    guard let loaded = try? loadTheme(id: themeId),
+  public func resolveReactionAsset(themeId: String, reaction: String, side: String? = nil, variantId: String = "default", overrides: JSONValue? = nil) -> (asset: ThemeAsset, durationMs: Int?)? {
+    guard let loaded = try? loadTheme(id: themeId, variantId: variantId, overrides: overrides),
           let descriptor = loaded.manifest.reactions?[reaction]
     else { return nil }
     let candidate: String?
@@ -93,6 +93,7 @@ public final class ThemeRuntime: @unchecked Sendable {
 
 public struct LoadedTheme: Equatable, Sendable {
   public var id: String
+  public var variantId: String
   public var manifest: ThemeManifest
   public var themeDirectory: URL
   public var isBuiltIn: Bool

@@ -62,14 +62,29 @@ final class DashboardWindowController: NSWindowController {
     row.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
     let title = session.metadata.sessionTitle ?? session.id
     let cwd = session.metadata.cwd.isEmpty ? "-" : session.metadata.cwd
+    let terminal = [
+      session.metadata.host.isEmpty ? nil : "host=\(session.metadata.host)",
+      session.metadata.platform.map { "platform=\($0)" },
+      session.metadata.model.map { "model=\($0)" },
+      session.metadata.ghosttyTerminalId.map { "ghostty=\($0)" },
+      session.metadata.wtHwnd.map { "wt=\($0)" }
+    ].compactMap { $0 }.joined(separator: " ")
+    let taskInfo = [
+      session.metadata.toolName.map { "tool=\($0)" },
+      session.metadata.backgroundTasksCount > 0 ? "background=\(session.metadata.backgroundTasksCount)" : nil,
+      session.metadata.sessionCronsCount > 0 ? "crons=\(session.metadata.sessionCronsCount)" : nil,
+      session.metadata.stopHookActive ? "stop-hook" : nil
+    ].compactMap { $0 }.joined(separator: " ")
     let label = NSTextField(labelWithString: """
     [\(session.badge)] \(session.metadata.agentId) / \(session.state.rawValue)
     \(title)
     \(cwd)
+    \(terminal)
+    \(taskInfo)
     """)
     label.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
     label.lineBreakMode = .byTruncatingMiddle
-    label.maximumNumberOfLines = 4
+    label.maximumNumberOfLines = 6
     row.addArrangedSubview(label)
     let focus = SessionButton()
     focus.title = "Focus"

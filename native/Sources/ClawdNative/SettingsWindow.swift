@@ -79,6 +79,24 @@ final class SettingsWindowController: NSWindowController {
     }
     let prefs = preferencesStore.get()
 
+    let general = sectionTitle("General")
+    stack.addArrangedSubview(general)
+    stack.addArrangedSubview(booleanRow("Show Dock icon", key: "showDock", value: prefs.showDock))
+    stack.addArrangedSubview(booleanRow("Open at login", key: "openAtLogin", value: prefs.openAtLogin))
+    stack.addArrangedSubview(booleanRow("Manage Claude hooks automatically", key: "manageClaudeHooksAutomatically", value: prefs.manageClaudeHooksAutomatically))
+    stack.addArrangedSubview(booleanRow("Auto-start with Claude", key: "autoStartWithClaude", value: prefs.autoStartWithClaude))
+    stack.addArrangedSubview(booleanRow("Bubble follows pet", key: "bubbleFollowPet", value: prefs.bubbleFollowPet))
+    stack.addArrangedSubview(booleanRow("Low power idle", key: "lowPowerIdleMode", value: prefs.lowPowerIdleMode))
+    stack.addArrangedSubview(booleanRow("Keep awake while working", key: "keepAwakeWhileWorking", value: prefs.keepAwakeWhileWorking))
+    stack.addArrangedSubview(booleanRow("Allow edge pinning", key: "allowEdgePinning", value: prefs.allowEdgePinning))
+    stack.addArrangedSubview(booleanRow("Keep size across displays", key: "keepSizeAcrossDisplays", value: prefs.keepSizeAcrossDisplays))
+    stack.addArrangedSubview(booleanRow("Enable mobile preview", key: "mobilePreviewEnabled", value: prefs.mobilePreviewEnabled))
+    stack.addArrangedSubview(booleanRow("Mute sounds", key: "soundMuted", value: prefs.soundMuted))
+    stack.addArrangedSubview(booleanRow("Flash on complete", key: "flashTaskbarOnComplete", value: prefs.flashTaskbarOnComplete))
+    stack.addArrangedSubview(booleanRow("Auto-approve all permissions", key: "autoApproveAllPermissions", value: prefs.autoApproveAllPermissions))
+
+    stack.addArrangedSubview(separator())
+
     let appearance = sectionTitle("Appearance")
     stack.addArrangedSubview(appearance)
 
@@ -96,6 +114,7 @@ final class SettingsWindowController: NSWindowController {
     themePopup.action = #selector(changeTheme(_:))
     themeRow.addArrangedSubview(themePopup)
     stack.addArrangedSubview(themeRow)
+    stack.addArrangedSubview(textRow(label: "Theme variant", value: prefs.themeVariant[prefs.theme] ?? "default", identifier: "theme-variant", action: #selector(updateTextPreference(_:))))
 
     let mini = NSButton(checkboxWithTitle: "Mini mode", target: self, action: #selector(toggleMini(_:)))
     mini.state = prefs.miniMode ? .on : .off
@@ -115,6 +134,17 @@ final class SettingsWindowController: NSWindowController {
     edgePopup.action = #selector(changeMiniEdge(_:))
     edgeRow.addArrangedSubview(edgePopup)
     stack.addArrangedSubview(edgeRow)
+
+    stack.addArrangedSubview(separator())
+
+    let hudHeading = sectionTitle("Session HUD")
+    stack.addArrangedSubview(hudHeading)
+    stack.addArrangedSubview(booleanRow("Enable Session HUD", key: "sessionHudEnabled", value: prefs.sessionHudEnabled))
+    stack.addArrangedSubview(booleanRow("Show state labels", key: "sessionHudShowStateLabels", value: prefs.sessionHudShowStateLabels))
+    stack.addArrangedSubview(booleanRow("Show elapsed time", key: "sessionHudShowElapsed", value: prefs.sessionHudShowElapsed))
+    stack.addArrangedSubview(booleanRow("Show context usage", key: "sessionHudShowContextUsage", value: prefs.sessionHudShowContextUsage))
+    stack.addArrangedSubview(booleanRow("Cleanup detached sessions", key: "sessionHudCleanupDetached", value: prefs.sessionHudCleanupDetached))
+    stack.addArrangedSubview(booleanRow("Pin Session HUD", key: "sessionHudPinned", value: prefs.sessionHudPinned))
 
     stack.addArrangedSubview(separator())
 
@@ -153,6 +183,24 @@ final class SettingsWindowController: NSWindowController {
     stack.addArrangedSubview(NSTextField(labelWithString: "Mobile preview: GET /mobile-preview on the local hook server"))
     stack.addArrangedSubview(NSTextField(labelWithString: "Remote SSH status: GET /remote-ssh/status on the local hook server"))
     stack.addArrangedSubview(NSTextField(labelWithString: "Updater: \(UpdaterRuntime.gitModePlan().check.joined(separator: " "))"))
+
+    stack.addArrangedSubview(separator())
+
+    let shortcutsHeading = sectionTitle("Shortcuts")
+    stack.addArrangedSubview(shortcutsHeading)
+    stack.addArrangedSubview(textRow(label: "Toggle pet", value: prefs.shortcuts["togglePet"] ?? "", identifier: "shortcut-togglePet", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: "Allow", value: prefs.shortcuts["permissionAllow"] ?? "", identifier: "shortcut-permissionAllow", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: "Deny", value: prefs.shortcuts["permissionDeny"] ?? "", identifier: "shortcut-permissionDeny", action: #selector(updateTextPreference(_:))))
+
+    stack.addArrangedSubview(separator())
+
+    let hardwareHeading = sectionTitle("Hardware Buddy")
+    stack.addArrangedSubview(hardwareHeading)
+    stack.addArrangedSubview(booleanRow("Enable Hardware Buddy", key: "hardwareBuddy.enabled", value: prefs.hardwareBuddy.enabled))
+    stack.addArrangedSubview(booleanRow("Allow hardware permission replies", key: "hardwareBuddy.permissionsEnabled", value: prefs.hardwareBuddy.permissionsEnabled))
+    stack.addArrangedSubview(booleanRow("Enable quick commands", key: "hardwareBuddy.quickCommandsEnabled", value: prefs.hardwareBuddy.quickCommandsEnabled))
+    stack.addArrangedSubview(textRow(label: "Device", value: prefs.hardwareBuddy.deviceAddress ?? "", identifier: "hardware-device", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: "Name prefix", value: prefs.hardwareBuddy.namePrefix, identifier: "hardware-prefix", action: #selector(updateTextPreference(_:))))
 
     stack.addArrangedSubview(separator())
     addRemoteSSHSection(prefs)
@@ -459,6 +507,65 @@ final class SettingsWindowController: NSWindowController {
         prefs.telegramApproval.botTokenFile = sender.stringValue
       } else if id == "telegram-chat-id" {
         prefs.telegramApproval.chatId = sender.stringValue
+      } else if id == "theme-variant" {
+        prefs.themeVariant[prefs.theme] = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "default"
+      } else if id.hasPrefix("shortcut-") {
+        let key = String(id.dropFirst("shortcut-".count))
+        prefs.shortcuts[key] = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      } else if id == "hardware-device" {
+        prefs.hardwareBuddy.deviceAddress = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+      } else if id == "hardware-prefix" {
+        prefs.hardwareBuddy.namePrefix = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      }
+    }
+  }
+
+  private func booleanRow(_ title: String, key: String, value: Bool) -> NSButton {
+    let button = NSButton(checkboxWithTitle: title, target: self, action: #selector(toggleBooleanPreference(_:)))
+    button.identifier = NSUserInterfaceItemIdentifier(key)
+    button.state = value ? .on : .off
+    return button
+  }
+
+  @objc private func toggleBooleanPreference(_ sender: NSButton) {
+    guard let key = sender.identifier?.rawValue else { return }
+    let enabled = sender.state == .on
+    if key == "autoApproveAllPermissions", enabled {
+      let alert = NSAlert()
+      alert.messageText = "Enable auto-approve all permissions?"
+      alert.informativeText = "All agent permission requests will be approved without showing a bubble until Clawd Native quits."
+      alert.addButton(withTitle: "Enable")
+      alert.addButton(withTitle: "Cancel")
+      guard alert.runModal() == .alertFirstButtonReturn else {
+        sender.state = .off
+        return
+      }
+    }
+    _ = try? preferencesStore.update { prefs in
+      switch key {
+      case "showDock": prefs.showDock = enabled
+      case "openAtLogin": prefs.openAtLogin = enabled
+      case "manageClaudeHooksAutomatically": prefs.manageClaudeHooksAutomatically = enabled
+      case "autoStartWithClaude": prefs.autoStartWithClaude = enabled
+      case "bubbleFollowPet": prefs.bubbleFollowPet = enabled
+      case "lowPowerIdleMode": prefs.lowPowerIdleMode = enabled
+      case "keepAwakeWhileWorking": prefs.keepAwakeWhileWorking = enabled
+      case "allowEdgePinning": prefs.allowEdgePinning = enabled
+      case "keepSizeAcrossDisplays": prefs.keepSizeAcrossDisplays = enabled
+      case "mobilePreviewEnabled": prefs.mobilePreviewEnabled = enabled
+      case "soundMuted": prefs.soundMuted = enabled
+      case "flashTaskbarOnComplete": prefs.flashTaskbarOnComplete = enabled
+      case "autoApproveAllPermissions": prefs.autoApproveAllPermissions = enabled
+      case "sessionHudEnabled": prefs.sessionHudEnabled = enabled
+      case "sessionHudShowStateLabels": prefs.sessionHudShowStateLabels = enabled
+      case "sessionHudShowElapsed": prefs.sessionHudShowElapsed = enabled
+      case "sessionHudShowContextUsage": prefs.sessionHudShowContextUsage = enabled
+      case "sessionHudCleanupDetached": prefs.sessionHudCleanupDetached = enabled
+      case "sessionHudPinned": prefs.sessionHudPinned = enabled
+      case "hardwareBuddy.enabled": prefs.hardwareBuddy.enabled = enabled
+      case "hardwareBuddy.permissionsEnabled": prefs.hardwareBuddy.permissionsEnabled = enabled
+      case "hardwareBuddy.quickCommandsEnabled": prefs.hardwareBuddy.quickCommandsEnabled = enabled
+      default: break
       }
     }
   }

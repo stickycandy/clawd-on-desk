@@ -17,6 +17,7 @@ public enum Diagnostics {
     serverPort: Int?,
     preferencesURL: URL,
     projectRoot: URL,
+    preferences: Preferences = Preferences(),
     remoteSSHStatuses: [RemoteSSHStatus] = []
   ) -> [DiagnosticItem] {
     var items: [DiagnosticItem] = []
@@ -35,6 +36,27 @@ public enum Diagnostics {
       id: "themes",
       status: FileManager.default.fileExists(atPath: themes.path) ? "ok" : "warning",
       message: themes.path
+    ))
+    let themeRuntime = ThemeRuntime(projectRoot: projectRoot)
+    let variant = preferences.themeVariant[preferences.theme] ?? "default"
+    if let _ = try? themeRuntime.loadTheme(id: preferences.theme, variantId: variant, overrides: preferences.themeOverrides[preferences.theme]) {
+      items.append(.init(id: "theme-health", status: "ok", message: "\(preferences.theme) (\(variant)) validated"))
+    } else {
+      items.append(.init(id: "theme-health", status: "warning", message: "\(preferences.theme) could not be validated"))
+    }
+    let enabledAgents = AgentRegistry.all.filter { AgentGate.isAgentEnabled(preferences, $0.id) }
+    items.append(.init(id: "agent-gates", status: "ok", message: "\(enabledAgents.count)/\(AgentRegistry.all.count) agents enabled"))
+    let hooksDir = projectRoot.appendingPathComponent("hooks", isDirectory: true)
+    let missingInstallers = AgentRegistry.all.compactMap { agent -> String? in
+      guard let command = agent.installCommand, command.count >= 2 else { return nil }
+      let script = command[1]
+      guard script.hasPrefix("hooks/") else { return nil }
+      return FileManager.default.fileExists(atPath: projectRoot.appendingPathComponent(script).path) ? nil : agent.id
+    }
+    items.append(.init(
+      id: "agent-installers",
+      status: missingInstallers.isEmpty && FileManager.default.fileExists(atPath: hooksDir.path) ? "ok" : "warning",
+      message: missingInstallers.isEmpty ? "Installer scripts present" : "Missing installers: \(missingInstallers.joined(separator: ", "))"
     ))
     if remoteSSHStatuses.isEmpty {
       items.append(.init(id: "remote-ssh", status: "idle", message: "No active Remote SSH tunnel"))

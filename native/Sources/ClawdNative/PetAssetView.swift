@@ -93,7 +93,9 @@ final class PetAssetView: NSView {
   private func render() {
     let prefs = preferences()
     let displaySnapshot = miniMappedSnapshot(snapshot, preferences: prefs)
-    guard let asset = forcedAsset ?? themeRuntime.resolveAsset(themeId: prefs.theme, snapshot: displaySnapshot),
+    let variant = prefs.themeVariant[prefs.theme] ?? "default"
+    let overrides = prefs.themeOverrides[prefs.theme]
+    guard let asset = forcedAsset ?? themeRuntime.resolveAsset(themeId: prefs.theme, snapshot: displaySnapshot, variantId: variant, overrides: overrides),
           FileManager.default.fileExists(atPath: asset.url.path)
     else {
       webView.isHidden = true
@@ -231,8 +233,9 @@ final class PetAssetView: NSView {
   }
 
   private func playReaction(_ reaction: String, side: String?, autoReset: Bool = true) {
-    let theme = preferences().theme
-    guard let resolved = themeRuntime.resolveReactionAsset(themeId: theme, reaction: reaction, side: side) else { return }
+    let prefs = preferences()
+    let theme = prefs.theme
+    guard let resolved = themeRuntime.resolveReactionAsset(themeId: theme, reaction: reaction, side: side, variantId: prefs.themeVariant[theme] ?? "default", overrides: prefs.themeOverrides[theme]) else { return }
     reactionResetWorkItem?.cancel()
     forcedAsset = resolved.asset
     lastAssetKey = nil
@@ -299,7 +302,8 @@ final class PetAssetView: NSView {
   }
 
   private func hitRect(for asset: ThemeAsset) -> NSRect? {
-    guard let loaded = try? themeRuntime.loadTheme(id: asset.themeId),
+    let prefs = preferences()
+    guard let loaded = try? themeRuntime.loadTheme(id: asset.themeId, variantId: prefs.themeVariant[asset.themeId] ?? "default", overrides: prefs.themeOverrides[asset.themeId]),
           let hitBox = loaded.hitBox(for: asset),
           let viewBox = asset.manifest.viewBox
     else { return nil }

@@ -16,6 +16,19 @@ public struct PermissionRequest: Codable, Equatable, Sendable {
   public var requestId: String?
   public var bridgeURL: String?
   public var bridgeToken: String?
+  public var toolUseId: String?
+  public var toolInputFingerprint: String?
+  public var sourcePid: Int?
+  public var cwd: String
+  public var agentPid: Int?
+  public var pidChain: [Int]?
+  public var host: String?
+  public var platform: String?
+  public var model: String?
+  public var codexOriginator: String?
+  public var codexSource: String?
+  public var subagentId: String?
+  public var subagentType: String?
   public var isElicitation: Bool
   public var suggestions: [JSONValue]
 
@@ -28,6 +41,19 @@ public struct PermissionRequest: Codable, Equatable, Sendable {
     requestId: String? = nil,
     bridgeURL: String? = nil,
     bridgeToken: String? = nil,
+    toolUseId: String? = nil,
+    toolInputFingerprint: String? = nil,
+    sourcePid: Int? = nil,
+    cwd: String = "",
+    agentPid: Int? = nil,
+    pidChain: [Int]? = nil,
+    host: String? = nil,
+    platform: String? = nil,
+    model: String? = nil,
+    codexOriginator: String? = nil,
+    codexSource: String? = nil,
+    subagentId: String? = nil,
+    subagentType: String? = nil,
     isElicitation: Bool = false,
     suggestions: [JSONValue] = []
   ) {
@@ -39,6 +65,19 @@ public struct PermissionRequest: Codable, Equatable, Sendable {
     self.requestId = requestId
     self.bridgeURL = bridgeURL
     self.bridgeToken = bridgeToken
+    self.toolUseId = toolUseId
+    self.toolInputFingerprint = toolInputFingerprint
+    self.sourcePid = sourcePid
+    self.cwd = cwd
+    self.agentPid = agentPid
+    self.pidChain = pidChain
+    self.host = host
+    self.platform = platform
+    self.model = model
+    self.codexOriginator = codexOriginator
+    self.codexSource = codexSource
+    self.subagentId = subagentId
+    self.subagentType = subagentType
     self.isElicitation = isElicitation
     self.suggestions = Array(suggestions.prefix(20))
   }
@@ -104,6 +143,16 @@ public final class PermissionCoordinator: @unchecked Sendable {
     values.forEach { $0.resolve(decision) }
   }
 
+  public func resolveLatest(_ decision: PermissionDecision) -> Bool {
+    let latest: PendingPermission?
+    lock.lock()
+    latest = pending.values.sorted { $0.createdAt > $1.createdAt }.first
+    lock.unlock()
+    guard let latest else { return false }
+    latest.resolve(decision)
+    return true
+  }
+
   private func remove(_ id: UUID) {
     lock.lock()
     pending.removeValue(forKey: id)
@@ -112,16 +161,67 @@ public final class PermissionCoordinator: @unchecked Sendable {
 }
 
 public enum PermissionResponseBuilder {
-  public static func body(for decision: PermissionDecision, hookEventName: String = "PermissionRequest") -> Data? {
+  public static func body(for decision: PermissionDecision, agentId: String = "claude-code", hookEventName: String = "PermissionRequest") -> Data? {
     switch decision {
     case .noDecision:
       return nil
+    case .allow, .allowWithUpdatedPermissions, .deny:
+      switch agentId {
+      case "copilot-cli":
+        return copilotBody(for: decision)
+      case "hermes":
+        return hermesBody(for: decision)
+      default:
+        return hookSpecificBody(for: decision, hookEventName: hookEventName)
+      }
+    }
+  }
+
+  public static func opencodeBridgeReply(for decision: PermissionDecision) -> String? {
+    switch decision {
+    case .allow:
+      return "accept"
+    case .allowWithUpdatedPermissions(let permissions):
+      return permissions.isEmpty ? "accept" : "accept"
+    case .deny:
+      return "reject"
+    case .noDecision:
+      return nil
+    }
+  }
+
+  private static func hookSpecificBody(for decision: PermissionDecision, hookEventName: String) -> Data? {
+    switch decision {
     case .allow:
       return try? JSONEncoder().encode(HookSpecificOutput(hookSpecificOutput: .init(hookEventName: hookEventName, decision: .init(behavior: "allow", message: nil, updatedPermissions: nil))))
     case .allowWithUpdatedPermissions(let permissions):
       return try? JSONEncoder().encode(HookSpecificOutput(hookSpecificOutput: .init(hookEventName: hookEventName, decision: .init(behavior: "allow", message: nil, updatedPermissions: permissions))))
     case .deny(let message):
       return try? JSONEncoder().encode(HookSpecificOutput(hookSpecificOutput: .init(hookEventName: hookEventName, decision: .init(behavior: "deny", message: message, updatedPermissions: nil))))
+    case .noDecision:
+      return nil
+    }
+  }
+
+  private static func copilotBody(for decision: PermissionDecision) -> Data? {
+    switch decision {
+    case .allow, .allowWithUpdatedPermissions:
+      return try? JSONEncoder().encode(SimpleDecision(behavior: "allow", message: nil))
+    case .deny(let message):
+      return try? JSONEncoder().encode(SimpleDecision(behavior: "deny", message: message))
+    case .noDecision:
+      return nil
+    }
+  }
+
+  private static func hermesBody(for decision: PermissionDecision) -> Data? {
+    switch decision {
+    case .allow, .allowWithUpdatedPermissions:
+      return try? JSONEncoder().encode(HermesDecision(decision: "allow", message: nil))
+    case .deny(let message):
+      return try? JSONEncoder().encode(HermesDecision(decision: "deny", message: message))
+    case .noDecision:
+      return nil
     }
   }
 
@@ -138,6 +238,16 @@ public enum PermissionResponseBuilder {
     var behavior: String
     var message: String?
     var updatedPermissions: [JSONValue]?
+  }
+
+  private struct SimpleDecision: Codable {
+    var behavior: String
+    var message: String?
+  }
+
+  private struct HermesDecision: Codable {
+    var decision: String
+    var message: String?
   }
 }
 

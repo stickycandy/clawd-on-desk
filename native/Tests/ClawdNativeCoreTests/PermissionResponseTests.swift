@@ -33,4 +33,25 @@ final class PermissionResponseTests: XCTestCase {
     XCTAssertEqual(permissions.first?["type"] as? String, "setMode")
     XCTAssertEqual(permissions.first?["mode"] as? String, "acceptEdits")
   }
+
+  func testCopilotResponseUsesSimpleDecisionShape() throws {
+    let data = try XCTUnwrap(PermissionResponseBuilder.body(for: .deny(message: "no"), agentId: "copilot-cli"))
+    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    XCTAssertEqual(json?["behavior"] as? String, "deny")
+    XCTAssertEqual(json?["message"] as? String, "no")
+    XCTAssertNil(json?["hookSpecificOutput"])
+  }
+
+  func testHermesResponseUsesHermesDecisionShape() throws {
+    let data = try XCTUnwrap(PermissionResponseBuilder.body(for: .allow, agentId: "hermes"))
+    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    XCTAssertEqual(json?["decision"] as? String, "allow")
+    XCTAssertNil(json?["hookSpecificOutput"])
+  }
+
+  func testOpencodeBridgeReplyMapping() {
+    XCTAssertEqual(PermissionResponseBuilder.opencodeBridgeReply(for: .allow), "accept")
+    XCTAssertEqual(PermissionResponseBuilder.opencodeBridgeReply(for: .deny(message: nil)), "reject")
+    XCTAssertNil(PermissionResponseBuilder.opencodeBridgeReply(for: .noDecision))
+  }
 }

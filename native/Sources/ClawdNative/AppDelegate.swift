@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var statusMenu: StatusMenuController?
   private var integrationManager: IntegrationManager?
   private var updaterService: UpdaterService?
+  private var shortcutRuntime: ShortcutRuntime?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     let prefs = preferencesStore.get()
@@ -30,6 +31,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     integrationManager = IntegrationManager(projectRoot: projectRoot)
     updaterService = UpdaterService(projectRoot: projectRoot)
     petWindow = PetWindowController(engine: stateEngine, preferencesStore: preferencesStore, projectRoot: projectRoot)
+    shortcutRuntime = ShortcutRuntime(
+      preferencesStore: preferencesStore,
+      permissionCoordinator: permissionCoordinator,
+      petWindow: { [weak self] in self?.petWindow?.window }
+    )
     dashboard = DashboardWindowController(engine: stateEngine, focusManager: terminalFocusManager)
     sessionHUD = SessionHUDWindowController(
       engine: stateEngine,
@@ -49,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       settings: settings,
       preferencesStore: preferencesStore,
       syncHandler: { [weak self] in self?.syncIntegrations() },
+      repairHandler: { [weak self] in self?.repairIntegrations() },
+      cleanupHandler: { [weak self] in self?.cleanupIntegrations() },
       updateHandler: { [weak self] in self?.checkAndApplyUpdate() }
     )
 
@@ -73,12 +81,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     petWindow?.showWindow(nil)
+    shortcutRuntime?.start()
     syncIntegrations()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
     stopRemoteSSHProfiles()
     permissionCoordinator.cancelAll(with: .noDecision)
+    shortcutRuntime?.stop()
     remoteSSHRuntime.stopAll()
     server?.stop()
   }
@@ -97,6 +107,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       if !summary.isEmpty {
         print("Integration sync: \(summary)")
       }
+    }
+  }
+
+  private func repairIntegrations() {
+    guard let integrationManager else { return }
+    let prefs = preferencesStore.get()
+    DispatchQueue.global(qos: .utility).async {
+      let results = integrationManager.repairAll(preferences: prefs)
+      let summary = results.map { "\($0.agentId): \($0.status)" }.joined(separator: ", ")
+      print("Integration repair: \(summary)")
+    }
+  }
+
+  private func cleanupIntegrations() {
+    guard let integrationManager else { return }
+    DispatchQueue.global(qos: .utility).async {
+      let result = integrationManager.cleanupAll()
+      print("Integration cleanup: \(result.status) \(result.output)")
     }
   }
 

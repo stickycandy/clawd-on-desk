@@ -106,8 +106,13 @@ public struct ThemeManifest: Codable, Equatable, Sendable {
   }
 
   public static func load(from url: URL) throws -> ThemeManifest {
+    try load(from: url, variantId: "default", overrides: nil)
+  }
+
+  public static func load(from url: URL, variantId: String = "default", overrides: JSONValue? = nil) throws -> ThemeManifest {
     let data = try Data(contentsOf: url)
-    let manifest = try JSONDecoder().decode(ThemeManifest.self, from: data)
+    let patchedData = try patchedThemeData(data, variantId: variantId, overrides: overrides)
+    let manifest = try JSONDecoder().decode(ThemeManifest.self, from: patchedData)
     try manifest.validate()
     return manifest
   }
@@ -147,5 +152,93 @@ public struct ThemeManifest: Codable, Equatable, Sendable {
 
   public enum ThemeError: Error, Equatable {
     case missingRequiredState(String)
+  }
+
+  private static func patchedThemeData(_ data: Data, variantId: String, overrides: JSONValue?) throws -> Data {
+    guard var raw = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      return data
+    }
+    applyVariant(to: &raw, variantId: variantId)
+    if case .object(let map) = overrides {
+      applyOverrides(to: &raw, overrides: map.mapValues { $0.anyValue })
+    }
+    raw.removeValue(forKey: "variants")
+    return try JSONSerialization.data(withJSONObject: raw, options: [])
+  }
+
+  private static func applyVariant(to raw: inout [String: Any], variantId: String) {
+    guard let variants = raw["variants"] as? [String: Any] else { return }
+    let requested = variantId.isEmpty ? "default" : variantId
+    let spec = (variants[requested] as? [String: Any]) ?? (variants["default"] as? [String: Any])
+    guard let spec else { return }
+    let allowed: Set<String> = [
+      "states", "miniMode",
+      "workingTiers", "jugglingTiers", "idleAnimations", "wideHitboxFiles", "sleepingHitboxFiles",
+      "hitBoxes", "fileHitBoxes", "timings", "transitions", "objectScale", "displayHintMap"
+    ]
+    let replace: Set<String> = [
+      "workingTiers", "jugglingTiers", "idleAnimations", "wideHitboxFiles", "sleepingHitboxFiles", "displayHintMap"
+    ]
+    for (key, value) in spec {
+      if key == "name" || key == "description" || key == "preview" { continue }
+      guard allowed.contains(key) else { continue }
+      if replace.contains(key) || value is [Any] {
+        raw[key] = value
+      } else if let next = value as? [String: Any], let current = raw[key] as? [String: Any] {
+        raw[key] = deepMerge(current, next)
+      } else {
+        raw[key] = value
+      }
+    }
+  }
+
+  private static func applyOverrides(to raw: inout [String: Any], overrides: [String: Any]) {
+    if let stateOverrides = overrides["states"] as? [String: Any] {
+      var states = raw["states"] as? [String: Any] ?? [:]
+      for (state, entry) in stateOverrides {
+        if let files = filesFromOverride(entry) {
+          states[state] = files
+        }
+      }
+      raw["states"] = states
+    }
+    if let timings = overrides["timings"] as? [String: Any] {
+      raw["timings"] = deepMerge(raw["timings"] as? [String: Any] ?? [:], timings)
+    }
+    if let reactions = overrides["reactions"] as? [String: Any] {
+      raw["reactions"] = deepMerge(raw["reactions"] as? [String: Any] ?? [:], reactions)
+    }
+    if let hitbox = overrides["hitbox"] as? [String: Any] {
+      raw["hitBoxes"] = deepMerge(raw["hitBoxes"] as? [String: Any] ?? [:], hitbox)
+    }
+    if let idleAnimations = overrides["idleAnimations"] as? [Any] {
+      raw["idleAnimations"] = idleAnimations
+    }
+    if let displayHintMap = overrides["displayHintMap"] as? [String: Any] {
+      raw["displayHintMap"] = displayHintMap
+    }
+  }
+
+  private static func filesFromOverride(_ entry: Any) -> [String]? {
+    if let file = entry as? String, !file.isEmpty { return [file] }
+    if let files = entry as? [String], !files.isEmpty { return files }
+    guard let object = entry as? [String: Any] else { return nil }
+    if object["disabled"] as? Bool == true { return nil }
+    if let file = object["file"] as? String, !file.isEmpty { return [file] }
+    if let file = object["asset"] as? String, !file.isEmpty { return [file] }
+    if let files = object["files"] as? [String], !files.isEmpty { return files }
+    return nil
+  }
+
+  private static func deepMerge(_ current: [String: Any], _ next: [String: Any]) -> [String: Any] {
+    var out = current
+    for (key, value) in next {
+      if let left = out[key] as? [String: Any], let right = value as? [String: Any] {
+        out[key] = deepMerge(left, right)
+      } else {
+        out[key] = value
+      }
+    }
+    return out
   }
 }
