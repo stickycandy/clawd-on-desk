@@ -1,5 +1,12 @@
 "use strict";
 
+const ELECTRON_SKIP_INTEGRATION_SYNC_ENV = "CLAWD_ELECTRON_SKIP_INTEGRATION_SYNC";
+
+function isTruthyEnvFlag(value) {
+  if (!value) return false;
+  return !/^(0|false)$/i.test(String(value));
+}
+
 function hasPositiveCount(value) {
   return Number.isFinite(value) && value > 0;
 }
@@ -69,6 +76,7 @@ function defaultInstalledFlagSkipMessage(agentName, reason) {
 
 function createIntegrationSyncRuntime(options = {}) {
   const ctx = options.ctx || {};
+  const env = options.env || process.env;
   const getHookServerPort = options.getHookServerPort;
   const shouldManageClaudeHooks = options.shouldManageClaudeHooks;
   const isAgentEnabled = typeof options.isAgentEnabled === "function" ? options.isAgentEnabled : (() => true);
@@ -504,6 +512,9 @@ function createIntegrationSyncRuntime(options = {}) {
   }
 
   function syncEnabledStartupIntegrations() {
+    if (isTruthyEnvFlag(env[ELECTRON_SKIP_INTEGRATION_SYNC_ENV])) {
+      return { status: "skipped", reason: "electron-smoke-skip" };
+    }
     if (shouldManageClaudeHooks() && shouldSyncAgentIntegration("claude-code")) {
       syncClawdHooks();
       startClaudeSettingsWatcher();
@@ -542,5 +553,6 @@ function createIntegrationSyncRuntime(options = {}) {
 }
 
 module.exports = {
+  ELECTRON_SKIP_INTEGRATION_SYNC_ENV,
   createIntegrationSyncRuntime,
 };

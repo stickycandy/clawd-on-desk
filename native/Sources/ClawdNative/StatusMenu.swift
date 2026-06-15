@@ -11,6 +11,7 @@ final class StatusMenuController: NSObject {
   private let repairHandler: () -> Void
   private let cleanupHandler: () -> Void
   private let updateHandler: () -> Void
+  private let miniToggleHandler: (() -> Bool)?
   private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let dndItem = NSMenuItem(title: "Do Not Disturb", action: #selector(toggleDND), keyEquivalent: "")
   private let miniItem = NSMenuItem(title: "Mini Mode", action: #selector(toggleMini), keyEquivalent: "")
@@ -24,7 +25,8 @@ final class StatusMenuController: NSObject {
     syncHandler: @escaping () -> Void,
     repairHandler: @escaping () -> Void = {},
     cleanupHandler: @escaping () -> Void = {},
-    updateHandler: @escaping () -> Void = {}
+    updateHandler: @escaping () -> Void = {},
+    miniToggleHandler: (() -> Bool)? = nil
   ) {
     self.stateEngine = stateEngine
     self.dashboard = dashboard
@@ -34,8 +36,21 @@ final class StatusMenuController: NSObject {
     self.repairHandler = repairHandler
     self.cleanupHandler = cleanupHandler
     self.updateHandler = updateHandler
+    self.miniToggleHandler = miniToggleHandler
     super.init()
     configure()
+    if let preferencesStore {
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(preferencesChanged),
+        name: .clawdNativePreferencesDidChange,
+        object: preferencesStore
+      )
+    }
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 
   private func configure() {
@@ -85,6 +100,10 @@ final class StatusMenuController: NSObject {
 
   @objc private func toggleMini() {
     guard let preferencesStore else { return }
+    if let miniToggleHandler {
+      miniItem.state = miniToggleHandler() ? .on : .off
+      return
+    }
     let next = !(preferencesStore.get().miniMode)
     _ = try? preferencesStore.update { prefs in
       prefs.miniMode = next
@@ -94,6 +113,10 @@ final class StatusMenuController: NSObject {
       }
     }
     miniItem.state = next ? .on : .off
+  }
+
+  @objc private func preferencesChanged() {
+    miniItem.state = preferencesStore?.get().miniMode == true ? .on : .off
   }
 
   @objc private func syncIntegrations() {

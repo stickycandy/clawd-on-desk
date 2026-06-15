@@ -208,13 +208,18 @@ const SIZES = {
 // `_settingsController.applyUpdate()`, which auto-persists.
 const prefsModule = require("./prefs");
 const { createSettingsController } = require("./settings-controller");
+const {
+  ELECTRON_ALLOW_PARALLEL_ENV,
+  isTruthyEnvFlag,
+  resolveElectronPrefsPath,
+} = require("./electron-smoke-paths");
 const { createTranslator, i18n } = require("./i18n");
 const {
   getBubblePolicy,
   isAllBubblesHidden,
 } = require("./bubble-policy");
 const loginItemHelpers = require("./login-item");
-const PREFS_PATH = path.join(app.getPath("userData"), "clawd-prefs.json");
+const PREFS_PATH = resolveElectronPrefsPath(app.getPath("userData"));
 const _initialPrefsLoad = prefsModule.load(PREFS_PATH);
 
 // Lazy helpers — these run inside the action `effect` callbacks at click time,
@@ -3447,7 +3452,8 @@ app.on("open-url", (event, url) => {
   codexPetMain.enqueueImportUrl(url);
 });
 
-const gotTheLock = app.requestSingleInstanceLock();
+const allowParallelInstance = isTruthyEnvFlag(process.env[ELECTRON_ALLOW_PARALLEL_ENV]);
+const gotTheLock = allowParallelInstance || app.requestSingleInstanceLock();
 if (!gotTheLock) {
   if (process.argv.includes(REGISTER_PROTOCOL_DEV_ARG)) {
     const protocolRegistered = codexPetMain.registerProtocolClient();

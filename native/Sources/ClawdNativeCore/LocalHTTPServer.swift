@@ -1,6 +1,25 @@
 import Foundation
 import Network
 
+private final class ListenerStartResult: @unchecked Sendable {
+  private let lock = NSLock()
+  private var stored: Result<Void, Error>?
+
+  var value: Result<Void, Error>? {
+    lock.lock()
+    defer { lock.unlock() }
+    return stored
+  }
+
+  func complete(_ result: Result<Void, Error>) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard stored == nil else { return false }
+    stored = result
+    return true
+  }
+}
+
 public final class LocalHTTPServer: @unchecked Sendable {
   public static let defaultPorts = Array(23333...23337)
   public static let serverHeader = "X-Clawd-Server"
@@ -11,6 +30,8 @@ public final class LocalHTTPServer: @unchecked Sendable {
   private let permissions: PermissionCoordinator
   private let projectRoot: URL?
   private let remoteSSHStatuses: @Sendable () -> [RemoteSSHStatus]
+  private let passiveNotifications: @Sendable (PassiveNotificationEvent) -> Void
+  private let runtimeConfigURLOverride: URL?
   private let queue = DispatchQueue(label: "clawd.native.http")
   private var listener: NWListener?
 
@@ -21,13 +42,17 @@ public final class LocalHTTPServer: @unchecked Sendable {
     preferences: @escaping @Sendable () -> Preferences,
     permissions: PermissionCoordinator,
     projectRoot: URL? = nil,
-    remoteSSHStatuses: @escaping @Sendable () -> [RemoteSSHStatus] = { [] }
+    remoteSSHStatuses: @escaping @Sendable () -> [RemoteSSHStatus] = { [] },
+    passiveNotifications: @escaping @Sendable (PassiveNotificationEvent) -> Void = { _ in },
+    runtimeConfigURL: URL? = nil
   ) {
     self.engine = engine
     self.preferences = preferences
     self.permissions = permissions
     self.projectRoot = projectRoot
     self.remoteSSHStatuses = remoteSSHStatuses
+    self.passiveNotifications = passiveNotifications
+    self.runtimeConfigURLOverride = runtimeConfigURL
   }
 
   @discardableResult
@@ -36,11 +61,16 @@ public final class LocalHTTPServer: @unchecked Sendable {
     var lastError: Error?
     for candidate in ports {
       do {
-        let listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: UInt16(candidate))!)
+        let listener = try Self.makeLoopbackListener(port: candidate)
         listener.newConnectionHandler = { [weak self] connection in
           self?.handle(connection)
         }
-        listener.start(queue: queue)
+        let startError = startListenerAndWait(listener, port: candidate)
+        guard startError == nil else {
+          listener.cancel()
+          lastError = startError
+          continue
+        }
         self.listener = listener
         self.port = candidate
         try writeRuntimeConfig(port: candidate)
@@ -52,20 +82,72 @@ public final class LocalHTTPServer: @unchecked Sendable {
     throw lastError ?? ServerError.noAvailablePort
   }
 
+  private static func makeLoopbackListener(port: Int) throws -> NWListener {
+    guard let endpointPort = NWEndpoint.Port(rawValue: UInt16(port)),
+          let loopback = IPv4Address("127.0.0.1")
+    else { throw ServerError.noAvailablePort }
+    let parameters = NWParameters.tcp
+    parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopback), port: endpointPort)
+    return try NWListener(using: parameters)
+  }
+
   public func stop() {
     listener?.cancel()
     listener = nil
     port = nil
   }
 
+  private func startListenerAndWait(_ listener: NWListener, port candidate: Int) -> Error? {
+    let semaphore = DispatchSemaphore(value: 0)
+    let result = ListenerStartResult()
+    listener.stateUpdateHandler = { state in
+      switch state {
+      case .ready:
+        if result.complete(.success(())) {
+          semaphore.signal()
+        }
+      case .failed(let error):
+        if result.complete(.failure(error)) {
+          semaphore.signal()
+        }
+      case .cancelled:
+        if result.complete(.failure(ServerError.listenerTimeout(candidate))) {
+          semaphore.signal()
+        }
+      default:
+        break
+      }
+    }
+    listener.start(queue: queue)
+    guard semaphore.wait(timeout: .now() + .seconds(2)) == .success else {
+      return ServerError.listenerTimeout(candidate)
+    }
+    switch result.value {
+    case .success:
+      return nil
+    case .failure(let error):
+      return error
+    case nil:
+      return ServerError.listenerTimeout(candidate)
+    }
+  }
+
   private func writeRuntimeConfig(port: Int) throws {
-    let url = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".clawd", isDirectory: true)
-      .appendingPathComponent("runtime.json")
+    let url = runtimeConfigURLOverride ?? Self.runtimeConfigURL()
     try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     let payload = ["port": port, "app": LocalHTTPServer.serverId] as [String: Any]
     let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
     try data.write(to: url, options: [.atomic])
+  }
+
+  public static func runtimeConfigURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+    if let explicit = environment["CLAWD_NATIVE_RUNTIME_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !explicit.isEmpty {
+      return URL(fileURLWithPath: explicit)
+    }
+    return FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".clawd", isDirectory: true)
+      .appendingPathComponent("runtime.json")
   }
 
   private func handle(_ connection: NWConnection) {
@@ -109,7 +191,12 @@ public final class LocalHTTPServer: @unchecked Sendable {
       let data = (try? JSONEncoder.iso8601.encode(snapshot)) ?? Data("{}".utf8)
       send(connection, status: 200, contentType: "application/json", bodyData: data)
     case ("GET", "/mobile-preview"):
-      let body = MobilePreviewRuntime.html(snapshot: engine.snapshot(), preferences: preferences())
+      let prefs = preferences()
+      guard prefs.mobilePreviewEnabled else {
+        send(connection, status: 404, body: "mobile preview disabled")
+        return
+      }
+      let body = MobilePreviewRuntime.html(snapshot: engine.snapshot(), preferences: prefs)
       send(connection, status: 200, contentType: "text/html; charset=utf-8", bodyData: Data(body.utf8))
     case ("GET", "/diagnostics"):
       let items = Diagnostics.localReport(
@@ -142,11 +229,25 @@ public final class LocalHTTPServer: @unchecked Sendable {
       }
       let prefs = preferences()
       let agentId = payload.agentId?.trimmedNonEmpty ?? "claude-code"
+      let sessionId = payload.sessionId?.trimmedNonEmpty ?? "default"
       guard AgentGate.isAgentEnabled(prefs, agentId) else {
         send(connection, status: 204, bodyData: Data())
         return
       }
       guard !engine.shouldDropForDnd() else {
+        send(connection, status: 204, bodyData: Data())
+        return
+      }
+      let isPassivePermissionEvent = state == .notification
+        && payload.event?.trimmedNonEmpty == "PermissionRequest"
+        && Self.passivePermissionAgents.contains(agentId)
+      let isCodexSubagent = Self.codexRoleMarksHeadless(
+        agentId: agentId,
+        hookSource: payload.hookSource,
+        codexSessionRole: payload.codexSessionRole
+      )
+      if isPassivePermissionEvent, !AgentGate.isAgentPermissionsEnabled(prefs, agentId) {
+        passiveNotifications(.clear(agentId: agentId, sessionId: sessionId, reason: "agent-permissions-disabled"))
         send(connection, status: 204, bodyData: Data())
         return
       }
@@ -158,7 +259,7 @@ public final class LocalHTTPServer: @unchecked Sendable {
         pidChain: payload.pidChain?.compactMap { $0.positiveInt },
         agentId: agentId,
         host: payload.host?.trimmedNonEmpty ?? "local",
-        headless: payload.headless ?? false,
+        headless: (payload.headless ?? false) || isCodexSubagent,
         platform: payload.platform,
         model: payload.model,
         provider: payload.provider,
@@ -179,12 +280,14 @@ public final class LocalHTTPServer: @unchecked Sendable {
         backgroundTasksCount: payload.backgroundTasksCount?.nonNegativeInt ?? 0,
         sessionCronsCount: payload.sessionCronsCount?.nonNegativeInt ?? 0,
         stopHookActive: payload.stopHookActive ?? false,
+        transientPermissionEvent: isPassivePermissionEvent,
         hookSource: payload.hookSource
       )
       if let svg = payload.svg?.lastPathComponent, !svg.isEmpty {
         engine.setState(state)
       } else {
-        engine.updateSession(payload.sessionId?.trimmedNonEmpty ?? "default", state: state, event: payload.event, metadata: metadata)
+        engine.updateSession(sessionId, state: state, event: payload.event, metadata: metadata)
+        emitPassiveNotificationIfNeeded(payload: payload, state: state, agentId: agentId, sessionId: sessionId, preferences: prefs, metadata: metadata)
       }
       send(connection, status: 200, body: "ok")
     } catch {
@@ -203,7 +306,13 @@ public final class LocalHTTPServer: @unchecked Sendable {
       let prefs = preferences()
       let tool = payload.toolName?.trimmedNonEmpty ?? "unknown"
       let sessionId = payload.sessionId?.trimmedNonEmpty ?? "default"
-      let isHeadless = (payload.headless == true) || isHeadlessSession(sessionId)
+      let isHeadless = (payload.headless == true)
+        || isHeadlessSession(sessionId)
+        || Self.codexRoleMarksHeadless(
+          agentId: agentId,
+          hookSource: payload.hookSource,
+          codexSessionRole: payload.codexSessionRole
+        )
 
       if agentId == "pi" {
         respondPermission(connection, decision: .allow, agentId: agentId)
@@ -243,6 +352,7 @@ public final class LocalHTTPServer: @unchecked Sendable {
       if agentId == "codex", !AgentGate.isCodexPermissionInterceptEnabled(prefs) {
         let metadata = SessionMetadata(agentId: "codex", transientPermissionEvent: true)
         engine.updateSession(sessionId, state: .notification, event: "PermissionRequest", metadata: metadata)
+        emitCodexNativePermissionNotification(payload: payload, tool: tool, sessionId: sessionId, preferences: prefs, isHeadless: isHeadless)
         respondPermission(connection, decision: .noDecision, agentId: agentId)
         return
       }
@@ -298,9 +408,17 @@ public final class LocalHTTPServer: @unchecked Sendable {
   private static let passthroughTools: Set<String> = [
     "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TaskStop", "TaskOutput"
   ]
+  private static let passivePermissionAgents: Set<String> = ["kimi-cli"]
+  private static let terminalAttentionAgents: Set<String> = ["qoder"]
 
   private func isHeadlessSession(_ sessionId: String) -> Bool {
     engine.snapshot().sessions.first { $0.id == sessionId }?.metadata.headless == true
+  }
+
+  private static func codexRoleMarksHeadless(agentId: String, hookSource: String?, codexSessionRole: String?) -> Bool {
+    let role = codexSessionRole?.trimmedNonEmpty?.lowercased()
+    guard role == "subagent" else { return false }
+    return agentId == "codex" || hookSource?.trimmedNonEmpty == "codex-official"
   }
 
   private func permissionRequest(payload: HookPermissionRequest, agentId: String, sessionId: String, tool: String, suggestions: [JSONValue]) -> PermissionRequest {
@@ -393,6 +511,84 @@ public final class LocalHTTPServer: @unchecked Sendable {
     agentId == "claude-code" || agentId == "codebuddy" || agentId == "hermes"
   }
 
+  private func emitPassiveNotificationIfNeeded(
+    payload: HookStateRequest,
+    state: ClawdState,
+    agentId: String,
+    sessionId: String,
+    preferences prefs: Preferences,
+    metadata: SessionMetadata
+  ) {
+    guard state == .notification else {
+      passiveNotifications(.clear(agentId: agentId, sessionId: sessionId, reason: "state-transition:\(state.rawValue)"))
+      return
+    }
+    guard shouldShowPassiveNotification(prefs, agentId: agentId, headless: metadata.headless) else { return }
+    let event = payload.event?.trimmedNonEmpty
+    if agentId == "kimi-cli", event == "PermissionRequest" {
+      let tool = payload.toolName?.trimmedNonEmpty
+      let message = tool.map { "Approve or reject \($0) in the Kimi terminal." }
+        ?? "Approve or reject this request in the Kimi terminal."
+      passiveNotifications(.show(PassiveNotificationRequest(
+        kind: .kimiPermission,
+        agentId: agentId,
+        sessionId: sessionId,
+        title: "Kimi Permission",
+        message: message,
+        detail: payload.cwd?.trimmedNonEmpty
+      )))
+      return
+    }
+    if Self.terminalAttentionAgents.contains(agentId),
+       event == "Notification",
+       let tool = payload.toolName?.trimmedNonEmpty {
+      let name = agentDisplayName(agentId)
+      passiveNotifications(.show(PassiveNotificationRequest(
+        kind: .terminalAttention,
+        agentId: agentId,
+        sessionId: sessionId,
+        title: "\(name) Needs Attention",
+        message: "Review \(tool) in \(name)'s native prompt.",
+        detail: payload.cwd?.trimmedNonEmpty
+      )))
+    }
+  }
+
+  private func emitCodexNativePermissionNotification(
+    payload: HookPermissionRequest,
+    tool: String,
+    sessionId: String,
+    preferences prefs: Preferences,
+    isHeadless: Bool
+  ) {
+    guard shouldShowPassiveNotification(prefs, agentId: "codex", headless: isHeadless) else { return }
+    let description = payload.toolInputDescription?.trimmedNonEmpty
+      ?? payload.toolInput?.shortDescription
+    passiveNotifications(.show(PassiveNotificationRequest(
+      kind: .codexPermission,
+      agentId: "codex",
+      sessionId: sessionId,
+      title: "Codex Permission",
+      message: "Review \(tool) in the Codex terminal.",
+      detail: description
+    )))
+  }
+
+  private func shouldShowPassiveNotification(_ prefs: Preferences, agentId: String, headless: Bool) -> Bool {
+    guard !headless,
+          !prefs.hideBubbles,
+          prefs.notificationBubbleAutoCloseSeconds > 0
+    else { return false }
+    if agentId == "codex" || agentId == "kimi-cli" {
+      return AgentGate.isAgentPermissionsEnabled(prefs, agentId)
+    }
+    return AgentGate.isAgentNotificationHookEnabled(prefs, agentId)
+  }
+
+  private func agentDisplayName(_ agentId: String) -> String {
+    AgentRegistry.all.first { $0.id == agentId }?.displayName ?? agentId
+  }
+
   private func send(_ connection: NWConnection, status: Int, contentType: String = "text/plain; charset=utf-8", body: String) {
     send(connection, status: status, contentType: contentType, bodyData: Data(body.utf8))
   }
@@ -415,6 +611,7 @@ public final class LocalHTTPServer: @unchecked Sendable {
 
   public enum ServerError: Error {
     case noAvailablePort
+    case listenerTimeout(Int)
   }
 }
 
@@ -425,11 +622,11 @@ private struct HTTPRequest {
   var body: Data
 
   init?(data: Data) {
-    guard let text = String(data: data, encoding: .utf8),
-          let range = text.range(of: "\r\n\r\n")
+    let separator = Data([13, 10, 13, 10])
+    guard let range = data.range(of: separator),
+          let headerText = String(data: data.subdata(in: data.startIndex..<range.lowerBound), encoding: .utf8)
     else { return nil }
-    let headerText = String(text[..<range.lowerBound])
-    let headerLength = text.distance(from: text.startIndex, to: range.upperBound)
+    let headerLength = range.upperBound
     let lines = headerText.components(separatedBy: "\r\n")
     guard let requestLine = lines.first else { return nil }
     let parts = requestLine.split(separator: " ", maxSplits: 2).map(String.init)
@@ -469,6 +666,7 @@ private struct HookStateRequest: Decodable {
   var provider: String?
   var codexOriginator: String?
   var codexSource: String?
+  var codexSessionRole: String?
   var wtHwnd: String?
   var ghosttyTerminalId: String?
   var toolName: String?
@@ -495,6 +693,7 @@ private struct HookStateRequest: Decodable {
     case agentId = "agent_id"
     case codexOriginator = "codex_originator"
     case codexSource = "codex_source"
+    case codexSessionRole = "codex_session_role"
     case wtHwnd = "wt_hwnd"
     case ghosttyTerminalId = "ghostty_terminal_id"
     case toolName = "tool_name"
@@ -535,6 +734,8 @@ private struct HookPermissionRequest: Decodable {
   var model: String?
   var codexOriginator: String?
   var codexSource: String?
+  var codexSessionRole: String?
+  var hookSource: String?
   var subagentId: String?
   var subagentType: String?
   var permissionSuggestions: [JSONValue]?
@@ -556,6 +757,8 @@ private struct HookPermissionRequest: Decodable {
     case agentPid = "agent_pid"
     case codexOriginator = "codex_originator"
     case codexSource = "codex_source"
+    case codexSessionRole = "codex_session_role"
+    case hookSource = "hook_source"
     case subagentId = "subagent_id"
     case subagentType = "subagent_type"
     case permissionSuggestions = "permission_suggestions"

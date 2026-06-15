@@ -10,7 +10,19 @@ const SERVER_PORT_COUNT = 5;
 const SERVER_PORTS = Array.from({ length: SERVER_PORT_COUNT }, (_, i) => DEFAULT_SERVER_PORT + i);
 const STATE_PATH = "/state";
 const PERMISSION_PATH = "/permission";
-const RUNTIME_CONFIG_PATH = path.join(os.homedir(), ".clawd", "runtime.json");
+const ELECTRON_RUNTIME_PATH_ENV = "CLAWD_ELECTRON_RUNTIME_PATH";
+function normalizePathOverride(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? path.resolve(trimmed) : null;
+}
+function getRuntimeConfigPath(options = {}) {
+  const env = options.env || process.env;
+  const homeDir = options.homeDir || os.homedir();
+  return normalizePathOverride(env[ELECTRON_RUNTIME_PATH_ENV])
+    || path.join(homeDir, ".clawd", "runtime.json");
+}
+const RUNTIME_CONFIG_PATH = getRuntimeConfigPath();
 const DEFAULT_HOOK_HTTP_TIMEOUT_MS = 100;
 const REMOTE_HOOK_HTTP_TIMEOUT_MS = 5000;
 
@@ -27,9 +39,9 @@ function readHostPrefix() {
   return prefix || os.hostname().split(".")[0];
 }
 
-function readRuntimeConfig() {
+function readRuntimeConfig(filePath = getRuntimeConfigPath()) {
   try {
-    const raw = JSON.parse(fs.readFileSync(RUNTIME_CONFIG_PATH, "utf8"));
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
     if (!raw || typeof raw !== "object") return null;
     const port = normalizePort(raw.port);
     return port ? { port } : null;
@@ -38,22 +50,22 @@ function readRuntimeConfig() {
   }
 }
 
-function readRuntimePort() {
-  const config = readRuntimeConfig();
+function readRuntimePort(filePath) {
+  const config = readRuntimeConfig(filePath);
   return config ? config.port : null;
 }
 
-function writeRuntimeConfig(port) {
+function writeRuntimeConfig(port, filePath = getRuntimeConfigPath()) {
   const safePort = normalizePort(port);
   if (!safePort) return false;
 
-  const dir = path.dirname(RUNTIME_CONFIG_PATH);
+  const dir = path.dirname(filePath);
   const tmpPath = path.join(dir, `.runtime.${process.pid}.${Date.now()}.tmp`);
   const body = JSON.stringify({ app: CLAWD_SERVER_ID, port: safePort }, null, 2);
   fs.mkdirSync(dir, { recursive: true });
   try {
     fs.writeFileSync(tmpPath, body, "utf8");
-    fs.renameSync(tmpPath, RUNTIME_CONFIG_PATH);
+    fs.renameSync(tmpPath, filePath);
     return true;
   } catch {
     try { fs.unlinkSync(tmpPath); } catch {}
@@ -61,7 +73,7 @@ function writeRuntimeConfig(port) {
   }
 }
 
-function clearRuntimeConfig(filePath = RUNTIME_CONFIG_PATH) {
+function clearRuntimeConfig(filePath = getRuntimeConfigPath()) {
   try {
     fs.unlinkSync(filePath);
     return true;
@@ -835,6 +847,7 @@ module.exports = {
   PERMISSION_PATH,
   REMOTE_HOOK_HTTP_TIMEOUT_MS,
   RUNTIME_CONFIG_PATH,
+  ELECTRON_RUNTIME_PATH_ENV,
   SERVER_PORTS,
   STATE_PATH,
   buildPermissionUrl,
@@ -842,6 +855,7 @@ module.exports = {
   discoverClawdPort,
   getPortCandidates,
   getPermissionProbeTimeoutMs,
+  getRuntimeConfigPath,
   getStatePostTimeoutMs,
   postPermissionToPort,
   postPermissionToRunningServer,

@@ -27,6 +27,25 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(body.string("hook_source"), "codex-official")
   }
 
+  func testCodexPermissionUsesTranscriptSessionMeta() throws {
+    let fixture = try HookFixture()
+    let transcript = fixture.root.appendingPathComponent("rollout-2026-06-12T10-00-00-019eb9ff-1111-7222-8333-abcdefabcdef.jsonl")
+    try """
+    {"type":"session_meta","payload":{"source":{"subagent":{"thread_spawn":{"agent_role":"worker"}}},"originator":"Codex Desktop","agent_id":"upstream-agent-id","agent_type":"worker"}}
+    """.write(to: transcript, atomically: true, encoding: .utf8)
+    let payload = Data(#"{"hook_event_name":"PermissionRequest","transcript_path":"\#(transcript.path)","tool_name":"Bash","tool_input":{"command":"npm test"},"source":"vscode"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "codex", event: "PermissionRequest", environment: [:]).route(stdin: payload)
+    guard case .permission(.object(let body)) = route else {
+      return XCTFail("expected permission route")
+    }
+    XCTAssertEqual(body.string("session_id"), "codex:019eb9ff-1111-7222-8333-abcdefabcdef")
+    XCTAssertEqual(body.string("codex_session_role"), "subagent")
+    XCTAssertEqual(body.string("codex_originator"), "Codex Desktop")
+    XCTAssertEqual(body.string("codex_source"), "vscode")
+    XCTAssertEqual(body.string("codex_subagent_id"), "upstream-agent-id")
+    XCTAssertEqual(body.string("codex_agent_type"), "worker")
+  }
+
   func testCopilotPermissionAcceptsCamelCasePayload() throws {
     let payload = Data(#"{"sessionId":"s1","toolName":"edit","toolInput":{"path":"a.swift"},"permissionSuggestions":[]}"#.utf8)
     let route = NativeHookRuntime(agentId: "copilot-cli", event: "permissionRequest", environment: [:]).route(stdin: payload)
@@ -37,6 +56,17 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(body.string("session_id"), "copilot-cli:s1")
     XCTAssertEqual(body.string("tool_name"), "edit")
     XCTAssertNotNil(body["permission_suggestions"])
+  }
+
+  func testQwenPermissionIncludesEmptySuggestionsForHookParity() throws {
+    let payload = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/repo"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "qwen-code", event: "PermissionRequest", environment: [:]).route(stdin: payload)
+    guard case .permission(.object(let body)) = route else {
+      return XCTFail("expected permission route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "qwen-code")
+    XCTAssertEqual(body.string("session_id"), "qwen-code:s1")
+    XCTAssertEqual(body.array("permission_suggestions")?.count, 0)
   }
 
   func testClaudeTranscriptAddsTitleAndAssistantOutput() throws {
@@ -111,6 +141,11 @@ final class NativeHookRuntimeTests: XCTestCase {
 private extension [String: JSONValue] {
   func string(_ key: String) -> String? {
     if case .string(let value)? = self[key] { return value }
+    return nil
+  }
+
+  func array(_ key: String) -> [JSONValue]? {
+    if case .array(let value)? = self[key] { return value }
     return nil
   }
 }

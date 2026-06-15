@@ -57,6 +57,15 @@ public enum ClawdState: String, Codable, CaseIterable, Sendable {
     }
   }
 
+  public var storesAsIdleOneShot: Bool {
+    switch self {
+    case .attention, .sweeping, .notification, .carrying, .miniAlert, .miniHappy:
+      return true
+    default:
+      return false
+    }
+  }
+
   public var isSleepSequence: Bool {
     switch self {
     case .yawning, .dozing, .collapsing, .sleeping, .waking, .miniSleep, .miniEnterSleep:
@@ -210,8 +219,9 @@ public struct AgentSession: Codable, Identifiable, Equatable, Sendable {
   }
 
   public var badge: String {
-    if state == .attention { return "Done" }
-    if state == .notification { return "Input" }
+    let latestEvent = event ?? recentEvents.last
+    if state == .attention || latestEvent == "Stop" || latestEvent == "event_msg:task_complete" { return "Done" }
+    if state == .notification || latestEvent == "Notification" || latestEvent == "PermissionRequest" || latestEvent == "Elicitation" { return "Input" }
     if state == .error { return "Error" }
     if state == .working || state == .thinking || state == .juggling || state == .carrying || state == .sweeping {
       return "Live"

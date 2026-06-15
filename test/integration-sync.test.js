@@ -6,7 +6,10 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { createIntegrationSyncRuntime } = require("../src/integration-sync");
+const {
+  ELECTRON_SKIP_INTEGRATION_SYNC_ENV,
+  createIntegrationSyncRuntime,
+} = require("../src/integration-sync");
 
 function withPatchedExport(modulePath, exportName, replacement, run) {
   const moduleExports = require(modulePath);
@@ -59,6 +62,7 @@ function makeRuntime(overrides = {}) {
     getHookServerPort: () => 24444,
     shouldManageClaudeHooks: () => true,
     isAgentEnabled: () => true,
+    env: {},
     startClaudeSettingsWatcher: () => calls.push({ name: "watcher:start" }),
     stopClaudeSettingsWatcher: () => {
       calls.push({ name: "watcher:stop" });
@@ -132,6 +136,28 @@ describe("integration sync runtime", () => {
       "hermes",
       "qoder",
     ]);
+  });
+
+  it("can skip startup sync for isolated Electron smoke runs", () => {
+    const { runtime, calls } = makeRuntime({
+      env: { [ELECTRON_SKIP_INTEGRATION_SYNC_ENV]: "1" },
+    });
+
+    assert.deepStrictEqual(
+      runtime.syncEnabledStartupIntegrations(),
+      { status: "skipped", reason: "electron-smoke-skip" }
+    );
+    assert.deepStrictEqual(calls, []);
+  });
+
+  it("does not let the smoke startup skip flag disable manual integration sync", () => {
+    const { runtime, calls } = makeRuntime({
+      env: { [ELECTRON_SKIP_INTEGRATION_SYNC_ENV]: "1" },
+    });
+
+    runtime.syncIntegrationForAgent("codex");
+
+    assert.deepStrictEqual(calls.map((entry) => entry.name), ["codex"]);
   });
 
   it("syncIntegrationForAgent respects Claude management gate", () => {

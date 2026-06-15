@@ -31,6 +31,22 @@ describe("server-config helpers", () => {
     assert.strictEqual(fs.existsSync(runtimePath), false);
   });
 
+  it("uses CLAWD_ELECTRON_RUNTIME_PATH for isolated runtime config files", () => {
+    const tmpHome = makeTempHome();
+    const runtimePath = path.join(tmpHome, "isolated", "runtime.json");
+    assert.strictEqual(
+      serverConfig.getRuntimeConfigPath({
+        env: { [serverConfig.ELECTRON_RUNTIME_PATH_ENV]: runtimePath },
+        homeDir: "/real/home",
+      }),
+      runtimePath
+    );
+
+    assert.strictEqual(serverConfig.writeRuntimeConfig(23334, runtimePath), true);
+    assert.strictEqual(serverConfig.readRuntimePort(runtimePath), 23334);
+    assert.strictEqual(fs.existsSync(path.join("/real/home", ".clawd", "runtime.json")), false);
+  });
+
   it("splitPortCandidates prioritizes preferred and runtime ports", () => {
     const result = serverConfig.splitPortCandidates(23335, { runtimePort: 23334 });
     assert.deepStrictEqual(result.direct, [23335, 23334]);

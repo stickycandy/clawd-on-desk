@@ -1,11 +1,20 @@
 import Foundation
 
 public struct StateTiming: Equatable, Sendable {
+  public enum SleepMode: String, Equatable, Sendable {
+    case full
+    case direct
+  }
+
   public var minDisplayMs: [ClawdState: Int]
   public var autoReturnMs: [ClawdState: Int]
   public var deepSleepTimeoutMs: Int
   public var mouseIdleTimeoutMs: Int
   public var mouseSleepTimeoutMs: Int
+  public var yawnDurationMs: Int
+  public var wakeDurationMs: Int
+  public var collapseDurationMs: Int
+  public var sleepMode: SleepMode
 
   public init(
     minDisplayMs: [ClawdState: Int] = [
@@ -28,13 +37,21 @@ public struct StateTiming: Equatable, Sendable {
     ],
     deepSleepTimeoutMs: Int = 600_000,
     mouseIdleTimeoutMs: Int = 20_000,
-    mouseSleepTimeoutMs: Int = 60_000
+    mouseSleepTimeoutMs: Int = 60_000,
+    yawnDurationMs: Int = 3_000,
+    wakeDurationMs: Int = 1_500,
+    collapseDurationMs: Int = 0,
+    sleepMode: SleepMode = .full
   ) {
     self.minDisplayMs = minDisplayMs
     self.autoReturnMs = autoReturnMs
     self.deepSleepTimeoutMs = deepSleepTimeoutMs
     self.mouseIdleTimeoutMs = mouseIdleTimeoutMs
     self.mouseSleepTimeoutMs = mouseSleepTimeoutMs
+    self.yawnDurationMs = yawnDurationMs
+    self.wakeDurationMs = wakeDurationMs
+    self.collapseDurationMs = collapseDurationMs
+    self.sleepMode = sleepMode
   }
 }
 
@@ -42,7 +59,7 @@ public final class StateEngine: @unchecked Sendable {
   public typealias Subscriber = @Sendable (StateSnapshot) -> Void
 
   private let lock = NSRecursiveLock()
-  private let timings: StateTiming
+  private var timings: StateTiming
   private var sessionsById: [String: AgentSession] = [:]
   private var currentState: ClawdState = .idle
   private var previousState: ClawdState = .idle
@@ -53,6 +70,18 @@ public final class StateEngine: @unchecked Sendable {
 
   public init(timings: StateTiming = StateTiming()) {
     self.timings = timings
+  }
+
+  public func updateTimings(_ timings: StateTiming) {
+    lock.lock()
+    self.timings = timings
+    lock.unlock()
+  }
+
+  public func timingSnapshot() -> StateTiming {
+    lock.lock()
+    defer { lock.unlock() }
+    return timings
   }
 
   public func subscribe(_ subscriber: @escaping Subscriber) -> UUID {
@@ -103,6 +132,38 @@ public final class StateEngine: @unchecked Sendable {
     }
   }
 
+  public func beginMouseSleepSequence() {
+    publish {
+      guard !doNotDisturb, currentState == .idle, resolveDisplayStateLocked() == .idle else { return }
+      if timings.sleepMode == .direct {
+        setStateLocked(.sleeping, force: true)
+      } else {
+        setStateLocked(.yawning, force: true)
+      }
+    }
+  }
+
+  public func deepenSleepIfDozing() {
+    publish {
+      guard !doNotDisturb, currentState == .dozing else { return }
+      setStateLocked(.collapsing, force: true)
+    }
+  }
+
+  public func wakeFromSleepSequence() {
+    publish {
+      guard !doNotDisturb else { return }
+      switch currentState {
+      case .sleeping, .collapsing:
+        setStateLocked(.waking, force: true)
+      case .dozing, .yawning:
+        setStateLocked(.idle, force: true)
+      default:
+        break
+      }
+    }
+  }
+
   public func updateSession(_ sessionId: String, state: ClawdState, event: String?, metadata: SessionMetadata = SessionMetadata()) {
     let trimmed = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
     let sid = trimmed.isEmpty ? "default" : trimmed
@@ -115,9 +176,7 @@ public final class StateEngine: @unchecked Sendable {
         if recent.count > 8 { recent.removeFirst(recent.count - 8) }
       }
       let startedAt = existing?.startedAt ?? now
-      let storedState = (metadata.preserveState || metadata.transientPermissionEvent)
-        ? (existing?.state ?? state)
-        : state
+      let storedState = storedSessionStateLocked(incoming: state, existing: existing, metadata: metadata)
       sessionsById[sid] = AgentSession(
         id: sid,
         state: storedState,
@@ -131,7 +190,17 @@ public final class StateEngine: @unchecked Sendable {
         sessionsById[sid]?.state = state
       }
       if metadata.transientPermissionEvent {
-        setStateLocked(.notification, force: false)
+        if doNotDisturb {
+          recomputeLocked(force: false)
+        } else {
+          setStateLocked(.notification, force: false)
+        }
+      } else if state.storesAsIdleOneShot {
+        if doNotDisturb {
+          recomputeLocked(force: false)
+        } else {
+          setStateLocked(state, force: false)
+        }
       } else {
         recomputeLocked(force: false)
       }
@@ -219,6 +288,13 @@ public final class StateEngine: @unchecked Sendable {
     return hasVisibleSession ? best : .idle
   }
 
+  private func storedSessionStateLocked(incoming state: ClawdState, existing: AgentSession?, metadata: SessionMetadata) -> ClawdState {
+    if metadata.preserveState || metadata.transientPermissionEvent {
+      return existing?.state ?? .idle
+    }
+    return state.storesAsIdleOneShot ? .idle : state
+  }
+
   private func setStateLocked(_ state: ClawdState, force: Bool) {
     guard force || state != currentState else { return }
     let elapsedMs = Int(Date().timeIntervalSince(stateChangedAt) * 1000)
@@ -238,7 +314,23 @@ public final class StateEngine: @unchecked Sendable {
     currentState = state
     stateChangedAt = Date()
     autoReturnWorkItem?.cancel()
-    if state.isOneShot, let delay = timings.autoReturnMs[state], delay > 0 {
+    if state == .yawning {
+      scheduleStateReturnLocked(afterMs: timings.yawnDurationMs, expected: .yawning) { [weak self] in
+        self?.setStateLocked(.dozing, force: true)
+      }
+    } else if state == .collapsing, timings.collapseDurationMs > 0 {
+      scheduleStateReturnLocked(afterMs: timings.collapseDurationMs, expected: .collapsing) { [weak self] in
+        self?.setStateLocked(.sleeping, force: true)
+      }
+    } else if state == .waking {
+      scheduleStateReturnLocked(afterMs: timings.wakeDurationMs, expected: .waking) { [weak self] in
+        guard let self else { return }
+        self.recomputeLocked(force: true)
+        if self.currentState == .waking {
+          self.setStateLocked(.idle, force: true)
+        }
+      }
+    } else if state.isOneShot, let delay = timings.autoReturnMs[state], delay > 0 {
       let work = DispatchWorkItem { [weak self] in
         guard let self else { return }
         self.publish {
@@ -251,6 +343,22 @@ public final class StateEngine: @unchecked Sendable {
       autoReturnWorkItem = work
       DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delay), execute: work)
     }
+  }
+
+  private func scheduleStateReturnLocked(afterMs delay: Int, expected: ClawdState, action: @escaping () -> Void) {
+    guard delay > 0 else {
+      action()
+      return
+    }
+    let work = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      self.publish {
+        guard self.currentState == expected else { return }
+        action()
+      }
+    }
+    autoReturnWorkItem = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delay), execute: work)
   }
 
   private func snapshotLocked() -> StateSnapshot {

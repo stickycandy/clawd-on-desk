@@ -34,6 +34,36 @@ final class PermissionResponseTests: XCTestCase {
     XCTAssertEqual(permissions.first?["mode"] as? String, "acceptEdits")
   }
 
+  func testCodexResponseOmitsUnsupportedPermissionFields() throws {
+    let updated = PermissionSuggestionFormatter.updatedPermission(from: .object([
+      "type": .string("setMode"),
+      "mode": .string("acceptEdits")
+    ]))
+    let data = try XCTUnwrap(PermissionResponseBuilder.body(for: .allowWithUpdatedPermissions([updated]), agentId: "codex"))
+    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    let output = try XCTUnwrap(json?["hookSpecificOutput"] as? [String: Any])
+    let decision = try XCTUnwrap(output["decision"] as? [String: Any])
+    XCTAssertEqual(decision["behavior"] as? String, "allow")
+    XCTAssertNil(decision["updatedInput"])
+    XCTAssertNil(decision["updatedPermissions"])
+    XCTAssertNil(decision["interrupt"])
+  }
+
+  func testQwenResponseOmitsUnsupportedPermissionFields() throws {
+    let updated = PermissionSuggestionFormatter.updatedPermission(from: .object([
+      "type": .string("setMode"),
+      "mode": .string("default")
+    ]))
+    let data = try XCTUnwrap(PermissionResponseBuilder.body(for: .allowWithUpdatedPermissions([updated]), agentId: "qwen-code"))
+    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    let output = try XCTUnwrap(json?["hookSpecificOutput"] as? [String: Any])
+    let decision = try XCTUnwrap(output["decision"] as? [String: Any])
+    XCTAssertEqual(decision["behavior"] as? String, "allow")
+    XCTAssertNil(decision["updatedInput"])
+    XCTAssertNil(decision["updatedPermissions"])
+    XCTAssertNil(decision["interrupt"])
+  }
+
   func testCopilotResponseUsesSimpleDecisionShape() throws {
     let data = try XCTUnwrap(PermissionResponseBuilder.body(for: .deny(message: "no"), agentId: "copilot-cli"))
     let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]

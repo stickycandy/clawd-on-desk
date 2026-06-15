@@ -171,8 +171,10 @@ public enum PermissionResponseBuilder {
         return copilotBody(for: decision)
       case "hermes":
         return hermesBody(for: decision)
+      case "codex", "qwen-code":
+        return hookSpecificBody(for: decision, hookEventName: hookEventName, includeUpdatedPermissions: false)
       default:
-        return hookSpecificBody(for: decision, hookEventName: hookEventName)
+        return hookSpecificBody(for: decision, hookEventName: hookEventName, includeUpdatedPermissions: true)
       }
     }
   }
@@ -190,12 +192,13 @@ public enum PermissionResponseBuilder {
     }
   }
 
-  private static func hookSpecificBody(for decision: PermissionDecision, hookEventName: String) -> Data? {
+  private static func hookSpecificBody(for decision: PermissionDecision, hookEventName: String, includeUpdatedPermissions: Bool) -> Data? {
     switch decision {
     case .allow:
       return try? JSONEncoder().encode(HookSpecificOutput(hookSpecificOutput: .init(hookEventName: hookEventName, decision: .init(behavior: "allow", message: nil, updatedPermissions: nil))))
     case .allowWithUpdatedPermissions(let permissions):
-      return try? JSONEncoder().encode(HookSpecificOutput(hookSpecificOutput: .init(hookEventName: hookEventName, decision: .init(behavior: "allow", message: nil, updatedPermissions: permissions))))
+      let updatedPermissions = includeUpdatedPermissions ? permissions : nil
+      return try? JSONEncoder().encode(HookSpecificOutput(hookSpecificOutput: .init(hookEventName: hookEventName, decision: .init(behavior: "allow", message: nil, updatedPermissions: updatedPermissions))))
     case .deny(let message):
       return try? JSONEncoder().encode(HookSpecificOutput(hookSpecificOutput: .init(hookEventName: hookEventName, decision: .init(behavior: "deny", message: message, updatedPermissions: nil))))
     case .noDecision:
