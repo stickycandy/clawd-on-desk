@@ -91,6 +91,12 @@ carrying/sweeping against blank scripted-SVG captures. The Session HUD,
 cross-theme visual, state matrix, transition, and targeted motion smokes also
 write `manifest.json` files with screenshot metrics and motion ratios.
 
+To summarize one or more smoke output directories into a review table:
+
+```bash
+node scripts/summarize-smoke-manifests.js /tmp/clawd-native-motion-suite
+```
+
 The native app listens on `127.0.0.1:23333-23337` and writes
 `~/.clawd/runtime.json`, matching the Electron app's hook contract.
 
