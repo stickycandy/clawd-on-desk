@@ -22,6 +22,7 @@ unset, the default is: motion visual state transitions hud.
 
 Environment:
   CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES  Transition cycles, default 1
+  CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO   Optional minimum motion ratio threshold
 USAGE
 }
 
@@ -44,6 +45,7 @@ else
 fi
 
 TRANSITION_CYCLES="${CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES:-1}"
+MIN_MOTION_RATIO="${CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO:-}"
 SUMMARY_PATH="$REVIEW_ROOT/summary.md"
 SUMMARY_JSON_PATH="$REVIEW_ROOT/summary.json"
 REVIEW_MANIFEST_PATH="$REVIEW_ROOT/review-manifest.json"
@@ -161,6 +163,9 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
   echo "- Review manifest: $REVIEW_MANIFEST_PATH"
   echo "- Summary JSON: $SUMMARY_JSON_PATH"
   echo "- Transition cycles: $TRANSITION_CYCLES"
+  if [[ -n "$MIN_MOTION_RATIO" ]]; then
+    echo "- Min motion ratio: $MIN_MOTION_RATIO"
+  fi
   echo
   echo "## Suite Status"
   echo
@@ -177,7 +182,13 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
   echo "## Manifest Summary"
   echo
   if [[ "$MANIFEST_COUNT" -gt 0 ]]; then
-    node "$SUMMARY_SCRIPT" --json "$SUMMARY_JSON_PATH" "$REVIEW_ROOT"
+    summary_args=("$SUMMARY_SCRIPT" --json "$SUMMARY_JSON_PATH")
+    if [[ -n "$MIN_MOTION_RATIO" ]]; then
+      summary_args+=(--min-motion-ratio "$MIN_MOTION_RATIO")
+    fi
+    if ! node "${summary_args[@]}" "$REVIEW_ROOT"; then
+      STATUS=1
+    fi
   else
     printf "{\n  \"generatedAt\": \"%s\",\n  \"count\": 0,\n  \"manifests\": []\n}\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$SUMMARY_JSON_PATH"
     echo "No suite manifest.json files found."

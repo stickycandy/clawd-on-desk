@@ -12,6 +12,7 @@ function fail(message) {
 function parseArgs(argv) {
   const args = {
     json: null,
+    minMotionRatio: null,
     inputs: [],
   };
 
@@ -23,6 +24,12 @@ function parseArgs(argv) {
         fail("--json expects an output path");
       }
       args.json = value;
+    } else if (arg === "--min-motion-ratio") {
+      const value = Number(argv[++i]);
+      if (!Number.isFinite(value) || value < 0 || value > 1) {
+        fail(`invalid --min-motion-ratio value: ${argv[i]}`);
+      }
+      args.minMotionRatio = value;
     } else if (arg === "-h" || arg === "--help") {
       printUsage();
       process.exit(0);
@@ -37,7 +44,7 @@ function parseArgs(argv) {
 }
 
 function printUsage() {
-  console.log("Usage: node scripts/summarize-smoke-manifests.js [--json output.json] <smoke-dir-or-manifest> [...]");
+  console.log("Usage: node scripts/summarize-smoke-manifests.js [--json output.json] [--min-motion-ratio 0..1] <smoke-dir-or-manifest> [...]");
 }
 
 function collectManifestPaths(inputs) {
@@ -136,11 +143,37 @@ function printMarkdown(rows) {
   }
 }
 
-function writeJson(file, rows) {
+function findMotionFailures(rows, minMotionRatio) {
+  if (!Number.isFinite(minMotionRatio)) return [];
+  const failures = [];
+  for (const row of rows) {
+    for (const ratio of row.motionRatios) {
+      if (ratio < minMotionRatio) {
+        failures.push({
+          file: row.file,
+          ratio,
+          minMotionRatio,
+        });
+      }
+    }
+  }
+  return failures;
+}
+
+function writeJson(file, rows, options = {}) {
+  const minMotionRatio = Number.isFinite(options.minMotionRatio)
+    ? options.minMotionRatio
+    : null;
+  const motionFailures = options.motionFailures || [];
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify({
     generatedAt: new Date().toISOString(),
     count: rows.length,
+    thresholds: {
+      minMotionRatio,
+    },
+    passed: motionFailures.length === 0,
+    motionFailures,
     manifests: rows.map((row) => ({
       file: row.file,
       relativeFile: path.relative(process.cwd(), row.file) || path.basename(row.file),
@@ -173,11 +206,21 @@ function main() {
   }
 
   const rows = manifestPaths.map(summarizeManifest);
+  const motionFailures = findMotionFailures(rows, args.minMotionRatio);
   if (args.json) {
-    writeJson(args.json, rows);
+    writeJson(args.json, rows, {
+      minMotionRatio: args.minMotionRatio,
+      motionFailures,
+    });
   }
   printMarkdown(rows);
   console.log(`\nFound ${rows.length} manifest(s).`);
+  if (Number.isFinite(args.minMotionRatio)) {
+    console.log(`Motion threshold: minMotionRatio=${args.minMotionRatio.toFixed(4)} failures=${motionFailures.length}`);
+  }
+  if (motionFailures.length > 0) {
+    fail(`${motionFailures.length} motion ratio(s) below threshold ${args.minMotionRatio}`);
+  }
 }
 
 main();

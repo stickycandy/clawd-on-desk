@@ -111,6 +111,8 @@ The review bundle accepts `motion`, `visual`, `state`, `transitions`, `hud`, or
 `summary` suite names. If no suite names are passed, it uses
 `CLAWD_NATIVE_REVIEW_SUITES`, defaulting to all suites; transition smoke cycles
 default to 1 and can be changed with `CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES`.
+Set `CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO` to make the generated summary fail if
+any motion manifest reports a lower frame-to-frame change ratio.
 
 To compare two PNG screenshots or two matching screenshot directories for
 per-pixel parity:
