@@ -12,6 +12,7 @@ PREFS_PATH="$SMOKE_DIR/prefs.json"
 RUNTIME_PATH="$SMOKE_DIR/runtime.json"
 LOG_PATH="$SMOKE_DIR/app.log"
 SCREENSHOT_PATH="${1:-$SMOKE_DIR/session-hud-click.png}"
+MANIFEST_PATH="${2:-$SMOKE_DIR/manifest.json}"
 APP_PID=""
 
 cleanup() {
@@ -40,7 +41,7 @@ require_command node
 require_command osascript
 require_command screencapture
 
-mkdir -p "$SMOKE_DIR" "$(dirname "$SCREENSHOT_PATH")"
+mkdir -p "$SMOKE_DIR" "$(dirname "$SCREENSHOT_PATH")" "$(dirname "$MANIFEST_PATH")"
 cat > "$PREFS_PATH" <<JSON
 {
   "positionSaved": true,
@@ -102,8 +103,13 @@ osascript \
   >/dev/null 2>&1 || true
 sleep 0.2
 screencapture -x "$SCREENSHOT_PATH" || fail "screencapture failed"
-node "$VERIFY_SCREENSHOTS" --min-images 1 "$SCREENSHOT_PATH" || fail "screenshot verification failed"
+node "$VERIFY_SCREENSHOTS" \
+  --min-images 1 \
+  --manifest "$MANIFEST_PATH" \
+  "$SCREENSHOT_PATH" \
+  || fail "screenshot verification failed"
 
 echo "Runtime: $RUNTIME_PATH"
 echo "Log: $LOG_PATH"
 echo "Screenshot: $SCREENSHOT_PATH"
+echo "Manifest: $MANIFEST_PATH"

@@ -82,14 +82,14 @@ bash scripts/smoke-motion-suite.sh
 ```
 
 All smoke scripts print the generated screenshot path or smoke root. The
-Session HUD smoke accepts an optional screenshot path, the cross-theme smoke
-scripts accept an optional output directory argument, and the transition smoke
-accepts an optional cycle count as its second argument. Each script also runs a
-PNG integrity check over its captured screenshot set before exiting; the state
-matrix verifier also guards Cloudling desktop carrying/sweeping against blank
-scripted-SVG captures. The cross-theme visual, state matrix, transition, and
-targeted motion smokes also write `manifest.json` files with screenshot metrics
-and motion ratios.
+Session HUD smoke accepts an optional screenshot path and optional manifest path,
+the cross-theme smoke scripts accept an optional output directory argument, and
+the transition smoke accepts an optional cycle count as its second argument. Each
+script also runs a PNG integrity check over its captured screenshot set before
+exiting; the state matrix verifier also guards Cloudling desktop
+carrying/sweeping against blank scripted-SVG captures. The Session HUD,
+cross-theme visual, state matrix, transition, and targeted motion smokes also
+write `manifest.json` files with screenshot metrics and motion ratios.
 
 The native app listens on `127.0.0.1:23333-23337` and writes
 `~/.clawd/runtime.json`, matching the Electron app's hook contract.
