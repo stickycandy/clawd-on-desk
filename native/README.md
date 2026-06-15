@@ -87,8 +87,8 @@ scripts accept an optional output directory argument, and the transition smoke
 accepts an optional cycle count as its second argument. Each script also runs a
 PNG integrity check over its captured screenshot set before exiting; the state
 matrix verifier also guards Cloudling desktop carrying/sweeping against blank
-scripted-SVG captures. Targeted motion smokes also write `manifest.json` files
-with screenshot metrics and motion ratios.
+scripted-SVG captures. The transition smoke and targeted motion smokes also
+write `manifest.json` files with screenshot metrics and motion ratios.
 
 The native app listens on `127.0.0.1:23333-23337` and writes
 `~/.clawd/runtime.json`, matching the Electron app's hook contract.

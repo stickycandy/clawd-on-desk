@@ -203,6 +203,11 @@ done
 
 cleanup_app
 EXPECTED_IMAGES=$((6 * (1 + CYCLE_COUNT * 6)))
-node "$VERIFY_SCREENSHOTS" --min-images "$EXPECTED_IMAGES" "$SMOKE_ROOT" || fail "screenshot verification failed"
+node "$VERIFY_SCREENSHOTS" \
+  --min-images "$EXPECTED_IMAGES" \
+  --manifest "$SMOKE_ROOT/manifest.json" \
+  "$SMOKE_ROOT" \
+  || fail "screenshot verification failed"
 echo "Smoke root: $SMOKE_ROOT"
 echo "Cycles: $CYCLE_COUNT"
+echo "Manifest: $SMOKE_ROOT/manifest.json"
