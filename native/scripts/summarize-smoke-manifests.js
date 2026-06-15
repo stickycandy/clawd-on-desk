@@ -9,6 +9,37 @@ function fail(message) {
   process.exit(1);
 }
 
+function parseArgs(argv) {
+  const args = {
+    json: null,
+    inputs: [],
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--json") {
+      const value = argv[++i];
+      if (!value) {
+        fail("--json expects an output path");
+      }
+      args.json = value;
+    } else if (arg === "-h" || arg === "--help") {
+      printUsage();
+      process.exit(0);
+    } else if (arg.startsWith("--")) {
+      fail(`unknown option: ${arg}`);
+    } else {
+      args.inputs.push(arg);
+    }
+  }
+
+  return args;
+}
+
+function printUsage() {
+  console.log("Usage: node scripts/summarize-smoke-manifests.js [--json output.json] <smoke-dir-or-manifest> [...]");
+}
+
 function collectManifestPaths(inputs) {
   const manifests = new Set();
   const stack = inputs.map((item) => ({ item, direct: true }));
@@ -105,22 +136,46 @@ function printMarkdown(rows) {
   }
 }
 
+function writeJson(file, rows) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    count: rows.length,
+    manifests: rows.map((row) => ({
+      file: row.file,
+      relativeFile: path.relative(process.cwd(), row.file) || path.basename(row.file),
+      sourceGeneratedAt: row.generatedAt,
+      screenshots: row.screenshots,
+      minUniqueColors: finiteOrNull(row.minUniqueColors),
+      minLuminanceRange: finiteOrNull(row.minLuminanceRange),
+      motionRatios: row.motionRatios,
+    })),
+  }, null, 2)}\n`);
+}
+
+function finiteOrNull(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
 function escapeMarkdown(value) {
   return String(value).replace(/\|/g, "\\|");
 }
 
 function main() {
-  const inputs = process.argv.slice(2);
-  if (inputs.length === 0) {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.inputs.length === 0) {
     fail("expected one or more smoke output directories or manifest.json files");
   }
 
-  const manifestPaths = collectManifestPaths(inputs);
+  const manifestPaths = collectManifestPaths(args.inputs);
   if (manifestPaths.length === 0) {
     fail("no manifest.json files found");
   }
 
   const rows = manifestPaths.map(summarizeManifest);
+  if (args.json) {
+    writeJson(args.json, rows);
+  }
   printMarkdown(rows);
   console.log(`\nFound ${rows.length} manifest(s).`);
 }

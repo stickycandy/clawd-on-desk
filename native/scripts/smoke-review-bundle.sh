@@ -45,6 +45,7 @@ fi
 
 TRANSITION_CYCLES="${CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES:-1}"
 SUMMARY_PATH="$REVIEW_ROOT/summary.md"
+SUMMARY_JSON_PATH="$REVIEW_ROOT/summary.json"
 REVIEW_MANIFEST_PATH="$REVIEW_ROOT/review-manifest.json"
 STATUS_TSV="$REVIEW_ROOT/suite-status.tsv"
 STATUS=0
@@ -129,11 +130,11 @@ for suite in "${SUITES[@]}"; do
   esac
 done
 
-node - "$REVIEW_ROOT" "$STATUS_TSV" "$REVIEW_MANIFEST_PATH" "$SUMMARY_PATH" <<'NODE'
+node - "$REVIEW_ROOT" "$STATUS_TSV" "$REVIEW_MANIFEST_PATH" "$SUMMARY_PATH" "$SUMMARY_JSON_PATH" <<'NODE'
 const fs = require("fs");
 const path = require("path");
 
-const [root, statusPath, manifestPath, summaryPath] = process.argv.slice(2);
+const [root, statusPath, manifestPath, summaryPath, summaryJsonPath] = process.argv.slice(2);
 const rows = fs.readFileSync(statusPath, "utf8")
   .trim()
   .split(/\n/)
@@ -147,6 +148,7 @@ fs.writeFileSync(manifestPath, `${JSON.stringify({
   generatedAt: new Date().toISOString(),
   root: path.resolve(root),
   summary: path.resolve(summaryPath),
+  summaryJson: path.resolve(summaryJsonPath),
   suites: rows,
 }, null, 2)}\n`);
 NODE
@@ -157,6 +159,7 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
   echo
   echo "- Root: $REVIEW_ROOT"
   echo "- Review manifest: $REVIEW_MANIFEST_PATH"
+  echo "- Summary JSON: $SUMMARY_JSON_PATH"
   echo "- Transition cycles: $TRANSITION_CYCLES"
   echo
   echo "## Suite Status"
@@ -174,8 +177,9 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
   echo "## Manifest Summary"
   echo
   if [[ "$MANIFEST_COUNT" -gt 0 ]]; then
-    node "$SUMMARY_SCRIPT" "$REVIEW_ROOT"
+    node "$SUMMARY_SCRIPT" --json "$SUMMARY_JSON_PATH" "$REVIEW_ROOT"
   else
+    printf "{\n  \"generatedAt\": \"%s\",\n  \"count\": 0,\n  \"manifests\": []\n}\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$SUMMARY_JSON_PATH"
     echo "No suite manifest.json files found."
   fi
 } >"$SUMMARY_PATH"
@@ -183,4 +187,5 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
 echo "Review root: $REVIEW_ROOT"
 echo "Review manifest: $REVIEW_MANIFEST_PATH"
 echo "Summary: $SUMMARY_PATH"
+echo "Summary JSON: $SUMMARY_JSON_PATH"
 exit "$STATUS"

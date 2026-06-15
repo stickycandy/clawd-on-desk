@@ -81,8 +81,8 @@ To run the targeted motion checks for all three renderer channels together:
 bash scripts/smoke-motion-suite.sh
 ```
 
-To run a review bundle that groups selected smoke suites and writes a single
-`summary.md` plus `review-manifest.json`:
+To run a review bundle that groups selected smoke suites and writes
+`summary.md`, `summary.json`, and `review-manifest.json`:
 
 ```bash
 bash scripts/smoke-review-bundle.sh /tmp/clawd-native-review motion visual state
@@ -98,10 +98,13 @@ carrying/sweeping against blank scripted-SVG captures. The Session HUD,
 cross-theme visual, state matrix, transition, and targeted motion smokes also
 write `manifest.json` files with screenshot metrics and motion ratios.
 
-To summarize one or more smoke output directories into a review table:
+To summarize one or more smoke output directories into a review table, with an
+optional machine-readable sidecar:
 
 ```bash
-node scripts/summarize-smoke-manifests.js /tmp/clawd-native-motion-suite
+node scripts/summarize-smoke-manifests.js \
+  --json /tmp/clawd-native-motion-summary.json \
+  /tmp/clawd-native-motion-suite
 ```
 
 The review bundle accepts `motion`, `visual`, `state`, `transitions`, `hud`, or
