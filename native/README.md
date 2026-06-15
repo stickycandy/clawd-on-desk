@@ -97,6 +97,13 @@ To summarize one or more smoke output directories into a review table:
 node scripts/summarize-smoke-manifests.js /tmp/clawd-native-motion-suite
 ```
 
+To compare two PNG screenshots or two matching screenshot directories for
+per-pixel parity:
+
+```bash
+node scripts/compare-smoke-screenshots.js /tmp/electron-baseline /tmp/native-smoke
+```
+
 The native app listens on `127.0.0.1:23333-23337` and writes
 `~/.clawd/runtime.json`, matching the Electron app's hook contract.
 
