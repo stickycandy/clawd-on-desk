@@ -113,6 +113,8 @@ The review bundle accepts `motion`, `visual`, `state`, `transitions`, `hud`, or
 default to 1 and can be changed with `CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES`.
 Set `CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO` to make the generated summary fail if
 any motion manifest reports a lower frame-to-frame change ratio.
+Set `CLAWD_NATIVE_VISUAL_SCOPE=desktop` to capture only the native visual smoke
+desktop subset (`all` remains the default; `mini` is also accepted).
 Set `CLAWD_NATIVE_VISUAL_CAPTURE_REGION=x,y,w,h` to crop native visual smoke
 screenshots to a fixed desktop region selected for the current display layout.
 Set `CLAWD_NATIVE_REVIEW_COMPARE_BASELINE` to an Electron baseline PNG directory

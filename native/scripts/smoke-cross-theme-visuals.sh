@@ -9,6 +9,7 @@ VERIFY_SCREENSHOTS="$SCRIPT_DIR/verify-smoke-screenshots.js"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 SMOKE_ROOT="${1:-${TMPDIR:-/tmp}/clawd-native-cross-theme-smoke-$RUN_ID}"
 CAPTURE_REGION="${CLAWD_NATIVE_VISUAL_CAPTURE_REGION:-}"
+VISUAL_SCOPE="${CLAWD_NATIVE_VISUAL_SCOPE:-all}"
 APP_PID=""
 CURRENT_LOG=""
 CURRENT_PORT=""
@@ -48,6 +49,9 @@ require_command screencapture
 
 if [[ -n "$CAPTURE_REGION" && ! "$CAPTURE_REGION" =~ ^-?[0-9]+,-?[0-9]+,[0-9]+,[0-9]+$ ]]; then
   fail "invalid capture region: $CAPTURE_REGION"
+fi
+if [[ "$VISUAL_SCOPE" != "all" && "$VISUAL_SCOPE" != "desktop" && "$VISUAL_SCOPE" != "mini" ]]; then
+  fail "invalid visual scope: $VISUAL_SCOPE"
 fi
 
 json_bool() {
@@ -145,19 +149,23 @@ capture_current() {
 capture_theme_group() {
   local theme="$1"
 
-  cleanup_app
-  start_native "$theme" "false" "$SMOKE_ROOT/$theme-desktop"
-  capture_current "$theme" "desktop-idle"
-  post_state "$CURRENT_PORT" "working" "native-$theme-desktop-working" "$theme desktop working" "PreToolUse"
-  capture_current "$theme" "desktop-working"
-  post_state "$CURRENT_PORT" "notification" "native-$theme-desktop-alert" "$theme desktop alert" "Notification"
-  capture_current "$theme" "desktop-alert"
+  if [[ "$VISUAL_SCOPE" == "all" || "$VISUAL_SCOPE" == "desktop" ]]; then
+    cleanup_app
+    start_native "$theme" "false" "$SMOKE_ROOT/$theme-desktop"
+    capture_current "$theme" "desktop-idle"
+    post_state "$CURRENT_PORT" "working" "native-$theme-desktop-working" "$theme desktop working" "PreToolUse"
+    capture_current "$theme" "desktop-working"
+    post_state "$CURRENT_PORT" "notification" "native-$theme-desktop-alert" "$theme desktop alert" "Notification"
+    capture_current "$theme" "desktop-alert"
+  fi
 
-  cleanup_app
-  start_native "$theme" "true" "$SMOKE_ROOT/$theme-mini"
-  capture_current "$theme" "mini-idle"
-  post_state "$CURRENT_PORT" "working" "native-$theme-mini-working" "$theme mini working" "PreToolUse"
-  capture_current "$theme" "mini-working"
+  if [[ "$VISUAL_SCOPE" == "all" || "$VISUAL_SCOPE" == "mini" ]]; then
+    cleanup_app
+    start_native "$theme" "true" "$SMOKE_ROOT/$theme-mini"
+    capture_current "$theme" "mini-idle"
+    post_state "$CURRENT_PORT" "working" "native-$theme-mini-working" "$theme mini working" "PreToolUse"
+    capture_current "$theme" "mini-working"
+  fi
 }
 
 mkdir -p "$SMOKE_ROOT"
@@ -167,19 +175,25 @@ for theme in clawd calico cloudling; do
 done
 
 cleanup_app
+case "$VISUAL_SCOPE" in
+  all) EXPECTED_IMAGES=15 ;;
+  desktop) EXPECTED_IMAGES=9 ;;
+  mini) EXPECTED_IMAGES=6 ;;
+esac
 node "$VERIFY_SCREENSHOTS" \
-  --min-images 15 \
+  --min-images "$EXPECTED_IMAGES" \
   --manifest "$SMOKE_ROOT/manifest.json" \
   "$SMOKE_ROOT" \
   || fail "screenshot verification failed"
 
-node - "$SMOKE_ROOT/manifest.json" "$CAPTURE_REGION" <<'NODE'
+node - "$SMOKE_ROOT/manifest.json" "$VISUAL_SCOPE" "$CAPTURE_REGION" <<'NODE'
 const fs = require("fs");
 
-const [manifestPath, captureRegion] = process.argv.slice(2);
+const [manifestPath, visualScope, captureRegion] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 manifest.runtime = "native";
 manifest.scope = "cross-theme-visual";
+manifest.visualScope = visualScope;
 if (captureRegion) {
   manifest.captureRegion = captureRegion;
 }
@@ -187,6 +201,7 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 
 echo "Smoke root: $SMOKE_ROOT"
+echo "Visual scope: $VISUAL_SCOPE"
 if [[ -n "$CAPTURE_REGION" ]]; then
   echo "Capture region: $CAPTURE_REGION"
 fi
