@@ -128,6 +128,9 @@ node scripts/compare-smoke-screenshots.js \
   /tmp/electron-baseline /tmp/native-smoke
 ```
 
+Comparison manifests include aggregate max changed ratio / mean delta and a
+`failures` list for rows that exceed the configured thresholds.
+
 The native app listens on `127.0.0.1:23333-23337` and writes
 `~/.clawd/runtime.json`, matching the Electron app's hook contract.
 

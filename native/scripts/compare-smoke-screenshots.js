@@ -264,7 +264,10 @@ function main() {
         maxChangedRatio: args.maxChangedRatio,
         maxMeanDelta: Number.isFinite(args.maxMeanDelta) ? args.maxMeanDelta : null,
       },
+      maxChangedRatio: maxRatio,
+      maxMeanDelta: maxMean,
       passed: failures.length === 0,
+      failures,
       results: rows,
     }, null, 2)}\n`);
     console.log(`Manifest: ${args.manifest}`);
