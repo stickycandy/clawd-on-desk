@@ -25,13 +25,31 @@ private enum SettingsTab: Int, CaseIterable {
   }
 }
 
+private final class SettingsDocumentView: NSView {
+  override var isFlipped: Bool { true }
+}
+
 @MainActor
 final class SettingsWindowController: NSWindowController {
+  private static let labelWidth: CGFloat = 150
+  private static let fieldWidth: CGFloat = 380
+  private static let rowWidth: CGFloat = 560
+  private static let textWidth: CGFloat = 660
+
+  private static func formatDouble(_ value: Double) -> String {
+    let rounded = (value * 1000).rounded() / 1000
+    if rounded.rounded() == rounded {
+      return String(Int(rounded))
+    }
+    return String(rounded)
+  }
+
   private let preferencesStore: PreferencesStore
   private let remoteSSHRuntime: RemoteSSHRuntime
   private let projectRoot: URL
   private let localPort: () -> Int?
   private let stack = NSStackView()
+  private let documentView = SettingsDocumentView()
   private var remoteStatusObserver: UUID?
   private var remoteFields: [String: NSTextField] = [:]
   private var remoteChecks: [String: NSButton] = [:]
@@ -79,13 +97,31 @@ final class SettingsWindowController: NSWindowController {
   }
 
   private func build() {
+    documentView.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .vertical
-    stack.spacing = 10
-    stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
+    stack.alignment = .leading
+    stack.spacing = 12
+    stack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 24, right: 24)
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    documentView.addSubview(stack)
+
     let scroll = NSScrollView()
     scroll.hasVerticalScroller = true
-    scroll.documentView = stack
+    scroll.hasHorizontalScroller = false
+    scroll.drawsBackground = true
+    scroll.documentView = documentView
     window?.contentView = scroll
+
+    NSLayoutConstraint.activate([
+      documentView.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+      documentView.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+      documentView.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+      documentView.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+      stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
+      stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
+      stack.topAnchor.constraint(equalTo: documentView.topAnchor),
+      stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor)
+    ])
     reload()
   }
 
@@ -103,8 +139,8 @@ final class SettingsWindowController: NSWindowController {
       view.removeFromSuperview()
     }
     let prefs = preferencesStore.get()
-    stack.addArrangedSubview(tabControl(prefs))
-    stack.addArrangedSubview(separator())
+    addFullWidthView(tabControl(prefs))
+    addFullWidthView(separator())
 
     switch selectedTab {
     case .general:
@@ -150,7 +186,10 @@ final class SettingsWindowController: NSWindowController {
     stack.addArrangedSubview(booleanRow("Keep size across displays", key: "keepSizeAcrossDisplays", value: prefs.keepSizeAcrossDisplays))
     stack.addArrangedSubview(booleanRow("Enable mobile preview", key: "mobilePreviewEnabled", value: prefs.mobilePreviewEnabled))
     stack.addArrangedSubview(booleanRow("Mute sounds", key: "soundMuted", value: prefs.soundMuted))
+    stack.addArrangedSubview(textRow(label: "Sound volume", value: Self.formatDouble(prefs.soundVolume), identifier: "number-soundVolume", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(booleanRow("Flash on complete", key: "flashTaskbarOnComplete", value: prefs.flashTaskbarOnComplete))
+    stack.addArrangedSubview(textRow(label: "Flash interval ms", value: String(prefs.flashIntervalMs), identifier: "number-flashIntervalMs", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: "Flash duration ms", value: String(prefs.flashDurationMs), identifier: "number-flashDurationMs", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(booleanRow("Auto-approve all permissions", key: "autoApproveAllPermissions", value: prefs.autoApproveAllPermissions))
   }
 
@@ -159,11 +198,9 @@ final class SettingsWindowController: NSWindowController {
     stack.addArrangedSubview(themeRow(prefs))
     stack.addArrangedSubview(textRow(label: "Theme variant", value: prefs.themeVariant[prefs.theme] ?? "default", identifier: "theme-variant", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(textRow(label: "Overrides JSON", value: prefs.themeOverrides[prefs.theme]?.shortDescription ?? "", identifier: "theme-overrides-json", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Overrides support theme states, miniMode, timings, reactions, hitbox, idleAnimations, and displayHintMap."))
+    stack.addArrangedSubview(infoLabel("Overrides support theme states, miniMode, timings, reactions, hitbox, idleAnimations, and displayHintMap."))
 
-    let mini = NSButton(checkboxWithTitle: "Mini mode", target: self, action: #selector(toggleMini(_:)))
-    mini.state = prefs.miniMode ? .on : .off
-    stack.addArrangedSubview(mini)
+    stack.addArrangedSubview(checkboxRow(title: "Mini mode", state: prefs.miniMode, identifier: nil, action: #selector(toggleMini(_:))))
     stack.addArrangedSubview(miniEdgeRow(prefs))
 
     stack.addArrangedSubview(separator())
@@ -223,6 +260,9 @@ final class SettingsWindowController: NSWindowController {
     let bubbles = NSButton(checkboxWithTitle: "Enable permission bubbles", target: self, action: #selector(toggleBubbles(_:)))
     bubbles.state = prefs.permissionBubblesEnabled && !prefs.hideBubbles ? .on : .off
     stack.addArrangedSubview(bubbles)
+    stack.addArrangedSubview(textRow(label: "Permission auto-close s", value: String(prefs.permissionBubbleAutoCloseSeconds), identifier: "number-permissionBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: "Notification auto-close s", value: String(prefs.notificationBubbleAutoCloseSeconds), identifier: "number-notificationBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: "Update auto-close s", value: String(prefs.updateBubbleAutoCloseSeconds), identifier: "number-updateBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
 
     let tray = NSButton(checkboxWithTitle: "Show status menu", target: self, action: #selector(toggleTray(_:)))
     tray.state = prefs.showTray ? .on : .off
@@ -230,10 +270,10 @@ final class SettingsWindowController: NSWindowController {
 
     stack.addArrangedSubview(separator())
     stack.addArrangedSubview(sectionTitle("Runtime"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Local hook server: \(localPort().map { "127.0.0.1:\($0)" } ?? "not running")"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Mobile preview: GET /mobile-preview"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Remote SSH status: GET /remote-ssh/status"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Updater: \(UpdaterRuntime.gitModePlan().check.joined(separator: " "))"))
+    stack.addArrangedSubview(infoLabel("Local hook server: \(localPort().map { "127.0.0.1:\($0)" } ?? "not running")"))
+    stack.addArrangedSubview(infoLabel("Mobile preview: GET /mobile-preview"))
+    stack.addArrangedSubview(infoLabel("Remote SSH status: GET /remote-ssh/status"))
+    stack.addArrangedSubview(infoLabel("Updater: \(UpdaterRuntime.gitModePlan().check.joined(separator: " "))"))
   }
 
   private func addShortcutsSection(_ prefs: Preferences) {
@@ -245,7 +285,7 @@ final class SettingsWindowController: NSWindowController {
     stack.addArrangedSubview(separator())
     stack.addArrangedSubview(sectionTitle("Diagnostics"))
     for diagnostic in ShortcutDiagnostics.validate(prefs.shortcuts) {
-      stack.addArrangedSubview(NSTextField(labelWithString: "\(diagnostic.status): \(diagnostic.message)"))
+      stack.addArrangedSubview(infoLabel("\(diagnostic.status): \(diagnostic.message)"))
     }
 
     stack.addArrangedSubview(separator())
@@ -259,18 +299,16 @@ final class SettingsWindowController: NSWindowController {
 
   private func addTelegramSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle("Telegram Approval"))
-    let tgEnabled = NSButton(checkboxWithTitle: "Enable Telegram approval", target: self, action: #selector(toggleTelegram(_:)))
-    tgEnabled.state = prefs.telegramApproval.enabled ? .on : .off
-    stack.addArrangedSubview(tgEnabled)
+    stack.addArrangedSubview(checkboxRow(title: "Enable Telegram approval", state: prefs.telegramApproval.enabled, identifier: nil, action: #selector(toggleTelegram(_:))))
     stack.addArrangedSubview(textRow(label: "Token file", value: prefs.telegramApproval.botTokenFile, identifier: "telegram-token-file", action: #selector(updateTextPreference(_:))))
     stack.addArrangedSubview(textRow(label: "Chat ID", value: prefs.telegramApproval.chatId, identifier: "telegram-chat-id", action: #selector(updateTextPreference(_:))))
   }
 
   private func addAboutSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("about", prefs: prefs)))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Clawd Native"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Project root: \(projectRoot.path)"))
-    stack.addArrangedSubview(NSTextField(labelWithString: "Preferences: \(PreferencesStore.defaultURL().path)"))
+    stack.addArrangedSubview(infoLabel("Clawd Native"))
+    stack.addArrangedSubview(infoLabel("Project root: \(projectRoot.path)"))
+    stack.addArrangedSubview(infoLabel("Preferences: \(PreferencesStore.defaultURL().path)"))
 
     let actions = NSStackView()
     actions.orientation = .horizontal
@@ -288,15 +326,17 @@ final class SettingsWindowController: NSWindowController {
       preferences: prefs,
       remoteSSHStatuses: remoteSSHRuntime.listStatuses()
     ) {
-      stack.addArrangedSubview(NSTextField(labelWithString: "\(item.status): \(item.id) - \(item.message)"))
+      stack.addArrangedSubview(infoLabel("\(item.status): \(item.id) - \(item.message)"))
     }
   }
 
   private func languageRow(_ prefs: Preferences) -> NSView {
     let row = NSStackView()
     row.orientation = .horizontal
-    row.spacing = 8
-    row.addArrangedSubview(NSTextField(labelWithString: "Language"))
+    row.alignment = .firstBaseline
+    row.spacing = 10
+    row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
+    row.addArrangedSubview(fieldLabel("Language"))
     let popup = NSPopUpButton()
     for lang in ["en", "zh", "ko", "ja"] {
       popup.addItem(withTitle: lang)
@@ -306,14 +346,17 @@ final class SettingsWindowController: NSWindowController {
     popup.target = self
     popup.action = #selector(changeLanguage(_:))
     row.addArrangedSubview(popup)
+    row.addArrangedSubview(spacer())
     return row
   }
 
   private func themeRow(_ prefs: Preferences) -> NSView {
     let row = NSStackView()
     row.orientation = .horizontal
-    row.spacing = 8
-    row.addArrangedSubview(NSTextField(labelWithString: "Theme"))
+    row.alignment = .firstBaseline
+    row.spacing = 10
+    row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
+    row.addArrangedSubview(fieldLabel("Theme"))
     let themePopup = NSPopUpButton()
     for theme in ["clawd", "calico", "cloudling"] {
       themePopup.addItem(withTitle: theme)
@@ -323,14 +366,17 @@ final class SettingsWindowController: NSWindowController {
     themePopup.target = self
     themePopup.action = #selector(changeTheme(_:))
     row.addArrangedSubview(themePopup)
+    row.addArrangedSubview(spacer())
     return row
   }
 
   private func miniEdgeRow(_ prefs: Preferences) -> NSView {
     let row = NSStackView()
     row.orientation = .horizontal
-    row.spacing = 8
-    row.addArrangedSubview(NSTextField(labelWithString: "Mini edge"))
+    row.alignment = .firstBaseline
+    row.spacing = 10
+    row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
+    row.addArrangedSubview(fieldLabel("Mini edge"))
     let edgePopup = NSPopUpButton()
     for edge in ["right", "left"] {
       edgePopup.addItem(withTitle: edge)
@@ -340,6 +386,7 @@ final class SettingsWindowController: NSWindowController {
     edgePopup.target = self
     edgePopup.action = #selector(changeMiniEdge(_:))
     row.addArrangedSubview(edgePopup)
+    row.addArrangedSubview(spacer())
     return row
   }
 
@@ -400,10 +447,10 @@ final class SettingsWindowController: NSWindowController {
     container.addArrangedSubview(remoteTextRow(profile: profile, field: "remoteForwardPort", label: "Forward port", value: String(profile.remoteForwardPort)))
     container.addArrangedSubview(remoteTextRow(profile: profile, field: "hostPrefix", label: "Host prefix", value: profile.hostPrefix ?? ""))
     if let node = profile.detectedRemoteNodeBin, let version = profile.detectedRemoteNodeVersion {
-      container.addArrangedSubview(NSTextField(labelWithString: "Remote Node: \(node) \(version)"))
+      container.addArrangedSubview(infoLabel("Remote Node: \(node) \(version)"))
     }
     if let lastDeployedAt = profile.lastDeployedAt {
-      container.addArrangedSubview(NSTextField(labelWithString: "Last deployed: \(Date(timeIntervalSince1970: lastDeployedAt / 1000).formatted())"))
+      container.addArrangedSubview(infoLabel("Last deployed: \(Date(timeIntervalSince1970: lastDeployedAt / 1000).formatted())"))
     }
 
     let primaryActions = NSStackView()
@@ -438,16 +485,16 @@ final class SettingsWindowController: NSWindowController {
   private func remoteTextRow(profile: RemoteSSHProfile, field: String, label: String, value: String) -> NSView {
     let row = NSStackView()
     row.orientation = .horizontal
-    row.spacing = 8
-    let labelView = NSTextField(labelWithString: label)
-    labelView.widthAnchor.constraint(equalToConstant: 120).isActive = true
-    row.addArrangedSubview(labelView)
+    row.alignment = .firstBaseline
+    row.spacing = 10
+    row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
+    row.addArrangedSubview(fieldLabel(label, width: 120))
     let textField = NSTextField(string: value)
     let id = remoteKey(profile.id, field)
     textField.identifier = NSUserInterfaceItemIdentifier(id)
     textField.target = self
     textField.action = #selector(saveRemoteProfileField(_:))
-    textField.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+    textField.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.fieldWidth).isActive = true
     row.addArrangedSubview(textField)
     remoteFields[id] = textField
     return row
@@ -668,6 +715,8 @@ final class SettingsWindowController: NSWindowController {
         var entry = prefs.agents[agentId] ?? AgentSettings()
         entry.permissionMode = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         prefs.agents[agentId] = entry
+      } else if id.hasPrefix("number-") {
+        applyNumericPreference(id: String(id.dropFirst("number-".count)), value: sender.stringValue, preferences: &prefs)
       } else if id == "hardware-device" {
         prefs.hardwareBuddy.deviceAddress = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
       } else if id == "hardware-prefix" {
@@ -676,11 +725,8 @@ final class SettingsWindowController: NSWindowController {
     }
   }
 
-  private func booleanRow(_ title: String, key: String, value: Bool) -> NSButton {
-    let button = NSButton(checkboxWithTitle: title, target: self, action: #selector(toggleBooleanPreference(_:)))
-    button.identifier = NSUserInterfaceItemIdentifier(key)
-    button.state = value ? .on : .off
-    return button
+  private func booleanRow(_ title: String, key: String, value: Bool) -> NSView {
+    checkboxRow(title: title, state: value, identifier: key, action: #selector(toggleBooleanPreference(_:)))
   }
 
   @objc private func toggleBooleanPreference(_ sender: NSButton) {
@@ -729,16 +775,44 @@ final class SettingsWindowController: NSWindowController {
   private func textRow(label: String, value: String, identifier: String, action: Selector) -> NSView {
     let row = NSStackView()
     row.orientation = .horizontal
-    row.spacing = 8
-    let labelView = NSTextField(labelWithString: label)
-    labelView.widthAnchor.constraint(equalToConstant: 90).isActive = true
-    row.addArrangedSubview(labelView)
+    row.alignment = .firstBaseline
+    row.spacing = 10
+    row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
+    row.addArrangedSubview(fieldLabel(label))
     let field = NSTextField(string: value)
     field.identifier = NSUserInterfaceItemIdentifier(identifier)
     field.target = self
     field.action = action
+    field.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.fieldWidth).isActive = true
     row.addArrangedSubview(field)
     return row
+  }
+
+  private func applyNumericPreference(id: String, value: String, preferences prefs: inout Preferences) {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    switch id {
+    case "soundVolume":
+      guard let number = Double(trimmed) else {
+        showAlert("\(id) must be a number.")
+        return
+      }
+      prefs.soundVolume = number
+    case "flashIntervalMs", "flashDurationMs", "permissionBubbleAutoCloseSeconds", "notificationBubbleAutoCloseSeconds", "updateBubbleAutoCloseSeconds":
+      guard let number = Int(trimmed) else {
+        showAlert("\(id) must be an integer.")
+        return
+      }
+      switch id {
+      case "flashIntervalMs": prefs.flashIntervalMs = number
+      case "flashDurationMs": prefs.flashDurationMs = number
+      case "permissionBubbleAutoCloseSeconds": prefs.permissionBubbleAutoCloseSeconds = number
+      case "notificationBubbleAutoCloseSeconds": prefs.notificationBubbleAutoCloseSeconds = number
+      case "updateBubbleAutoCloseSeconds": prefs.updateBubbleAutoCloseSeconds = number
+      default: break
+      }
+    default:
+      break
+    }
   }
 
   @objc private func toggleAgent(_ sender: NSButton) {
@@ -821,13 +895,62 @@ final class SettingsWindowController: NSWindowController {
 
   private func sectionTitle(_ text: String) -> NSTextField {
     let view = NSTextField(labelWithString: text)
-    view.font = NSFont.systemFont(ofSize: 16, weight: .bold)
+    view.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+    view.textColor = .labelColor
     return view
   }
 
   private func separator() -> NSBox {
     let view = NSBox()
     view.boxType = .separator
+    return view
+  }
+
+  private func addFullWidthView(_ view: NSView) {
+    stack.addArrangedSubview(view)
+    view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+  }
+
+  private func checkboxRow(title: String, state: Bool, identifier: String?, action: Selector) -> NSView {
+    let row = NSStackView()
+    row.orientation = .horizontal
+    row.alignment = .firstBaseline
+    row.spacing = 10
+    row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
+
+    let labelSpacer = NSView()
+    labelSpacer.widthAnchor.constraint(equalToConstant: Self.labelWidth).isActive = true
+    row.addArrangedSubview(labelSpacer)
+
+    let button = NSButton(checkboxWithTitle: title, target: self, action: action)
+    if let identifier {
+      button.identifier = NSUserInterfaceItemIdentifier(identifier)
+    }
+    button.state = state ? .on : .off
+    row.addArrangedSubview(button)
+    row.addArrangedSubview(spacer())
+    return row
+  }
+
+  private func fieldLabel(_ text: String, width: CGFloat = SettingsWindowController.labelWidth) -> NSTextField {
+    let label = NSTextField(labelWithString: text)
+    label.alignment = .right
+    label.textColor = .secondaryLabelColor
+    label.widthAnchor.constraint(equalToConstant: width).isActive = true
+    return label
+  }
+
+  private func infoLabel(_ text: String) -> NSTextField {
+    let label = NSTextField(wrappingLabelWithString: text)
+    label.lineBreakMode = .byWordWrapping
+    label.maximumNumberOfLines = 0
+    label.widthAnchor.constraint(lessThanOrEqualToConstant: Self.textWidth).isActive = true
+    return label
+  }
+
+  private func spacer() -> NSView {
+    let view = NSView()
+    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
     return view
   }
 

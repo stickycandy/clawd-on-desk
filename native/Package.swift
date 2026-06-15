@@ -13,7 +13,12 @@ let package = Package(
     .executable(name: "ClawdNativeHook", targets: ["ClawdNativeHook"])
   ],
   targets: [
-    .target(name: "ClawdNativeCore"),
+    .target(
+      name: "ClawdNativeCore",
+      linkerSettings: [
+        .linkedFramework("JavaScriptCore")
+      ]
+    ),
     .executableTarget(
       name: "ClawdNative",
       dependencies: ["ClawdNativeCore"],

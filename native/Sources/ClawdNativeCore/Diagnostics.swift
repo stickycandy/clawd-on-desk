@@ -13,6 +13,10 @@ public struct DiagnosticItem: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum Diagnostics {
+  private static let agentRuntimeDependencyPaths = [
+    "agents/kimi-cli.js"
+  ]
+
   public static func localReport(
     serverPort: Int?,
     preferencesURL: URL,
@@ -57,6 +61,16 @@ public enum Diagnostics {
       id: "agent-installers",
       status: missingInstallers.isEmpty && FileManager.default.fileExists(atPath: hooksDir.path) ? "ok" : "warning",
       message: missingInstallers.isEmpty ? "Installer scripts present" : "Missing installers: \(missingInstallers.joined(separator: ", "))"
+    ))
+    let missingRuntimeDependencies = agentRuntimeDependencyPaths.filter {
+      !FileManager.default.fileExists(atPath: projectRoot.appendingPathComponent($0).path)
+    }
+    items.append(.init(
+      id: "agent-runtime",
+      status: missingRuntimeDependencies.isEmpty ? "ok" : "warning",
+      message: missingRuntimeDependencies.isEmpty
+        ? "Agent runtime dependencies present"
+        : "Missing runtime dependencies: \(missingRuntimeDependencies.joined(separator: ", "))"
     ))
     let nativeAgents = NativeIntegrationInstaller.supportedAgentIds.sorted().joined(separator: ", ")
     items.append(.init(

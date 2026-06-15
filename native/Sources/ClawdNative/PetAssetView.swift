@@ -6,16 +6,48 @@ import WebKit
 final class PetAssetView: NSView {
   private let themeRuntime: ThemeRuntime
   private let preferences: () -> Preferences
-  private let webView: WKWebView
+  private var webView: WKWebView
   private let fallbackView = PetView(frame: .zero)
+  private let imageView = NSImageView(frame: .zero)
   private let badgeView = PetBadgeView(frame: .zero)
   private var lastAssetKey: String?
+  private var activeFileName: String?
+  private var activeImageFileName: String?
+  private var pendingAssetKey: String?
+  private var pendingAsset: ThemeAsset?
+  private var pendingDocument: ThemeWebDocument?
+  private var pendingWebView: WKWebView?
+  private var pendingNavigationDelegate: PetAssetWebNavigationDelegate?
+  private var pendingFadeInMs = 0
+  private var pendingFadeOutMs = 0
+  private var pendingSwapWorkItem: DispatchWorkItem?
+  private var fallbackHideWorkItem: DispatchWorkItem?
   private var currentAsset: ThemeAsset?
+  private var activeDocument: ThemeWebDocument?
   private var forcedAsset: ThemeAsset?
+  private var idleOverrideAsset: ThemeAsset?
   private var reactionResetWorkItem: DispatchWorkItem?
+  private var idleResetWorkItem: DispatchWorkItem?
   private var trackingArea: NSTrackingArea?
   private var dragStartMouse: NSPoint?
   private var dragStartFrame: NSRect?
+  private var draggingWindow = false
+  private var miniPeekActive = false
+  private var miniClip: MiniModeLayout.Clip?
+  private var appKitEyeOffset = CGSize.zero
+  private var webCacheBustSeq = 0
+  private var visualTrackingTimer: Timer?
+  private var lastCursorScreenPoint: NSPoint?
+  private var lastTrackingAssetKey: String?
+  private var lastEyeOffset: ThemeAssetGeometry.EyeOffset?
+  private var lastPointerPayload: ThemeAssetGeometry.PointerPayload?
+
+  private static let loadingWebAlpha: CGFloat = 0.01
+
+  var dragDidStart: (() -> Void)?
+  var dragDidEnd: (() -> Void)?
+  var miniHoverChanged: ((Bool) -> Void)?
+  var petClicked: (() -> Void)?
 
   var snapshot = StateSnapshot(currentState: .idle, sessions: [], updatedAt: Date()) {
     didSet {
@@ -28,18 +60,17 @@ final class PetAssetView: NSView {
   init(frame frameRect: NSRect, themeRuntime: ThemeRuntime, preferences: @escaping () -> Preferences) {
     self.themeRuntime = themeRuntime
     self.preferences = preferences
-    let config = WKWebViewConfiguration()
-    config.preferences.javaScriptCanOpenWindowsAutomatically = false
-    self.webView = WKWebView(frame: frameRect, configuration: config)
+    self.webView = Self.makeWebView(frame: frameRect)
     super.init(frame: frameRect)
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
-    webView.setValue(false, forKey: "drawsBackground")
-    webView.wantsLayer = true
-    webView.layer?.backgroundColor = NSColor.clear.cgColor
-    webView.isHidden = true
+    imageView.imageScaling = .scaleProportionallyUpOrDown
+    imageView.imageAlignment = .alignCenter
+    imageView.wantsLayer = true
+    imageView.layer?.backgroundColor = NSColor.clear.cgColor
+    imageView.isHidden = true
     addSubview(fallbackView)
-    addSubview(webView)
+    addSubview(imageView)
     addSubview(badgeView)
     NotificationCenter.default.addObserver(
       self,
@@ -47,6 +78,7 @@ final class PetAssetView: NSView {
       name: .clawdNativePreferencesDidChange,
       object: nil
     )
+    startVisualTracking()
     render()
   }
 
@@ -54,20 +86,48 @@ final class PetAssetView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override var mouseDownCanMoveWindow: Bool { true }
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    true
+  }
+
+  override var mouseDownCanMoveWindow: Bool { false }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    guard let asset = currentAsset, let hitRect = hitRect(for: asset) else {
-      return super.hitTest(point)
+    guard bounds.contains(point) else { return nil }
+    if let clipRect = miniClipRect(), !clipRect.contains(point) {
+      return nil
     }
-    return hitRect.contains(point) ? super.hitTest(point) : nil
+    guard let asset = currentAsset, let hitRect = hitRect(for: asset) else {
+      return self
+    }
+    return hitRect.contains(point) ? self : nil
+  }
+
+  func currentHitRect() -> NSRect? {
+    var rect: NSRect
+    if let asset = currentAsset, let hitRect = hitRect(for: asset) {
+      rect = hitRect
+    } else {
+      rect = bounds
+    }
+    if let clipRect = miniClipRect() {
+      rect = rect.intersection(clipRect)
+    }
+    return rect.isNull || rect.isEmpty ? nil : rect
   }
 
   override func layout() {
     super.layout()
     fallbackView.frame = bounds
     webView.frame = bounds
+    if let currentAsset {
+      applyImageFrame(for: currentAsset)
+    } else {
+      imageView.frame = bounds
+    }
+    pendingWebView?.frame = bounds
     badgeView.frame = bounds
+    applyMiniClip()
   }
 
   override func updateTrackingAreas() {
@@ -95,116 +155,342 @@ final class PetAssetView: NSView {
     let displaySnapshot = miniMappedSnapshot(snapshot, preferences: prefs)
     let variant = prefs.themeVariant[prefs.theme] ?? "default"
     let overrides = prefs.themeOverrides[prefs.theme]
-    guard let asset = forcedAsset ?? themeRuntime.resolveAsset(themeId: prefs.theme, snapshot: displaySnapshot, variantId: variant, overrides: overrides),
+    if displaySnapshot.currentState != .idle, idleOverrideAsset != nil {
+      idleResetWorkItem?.cancel()
+      idleResetWorkItem = nil
+      idleOverrideAsset = nil
+    }
+    let idleOverride = displaySnapshot.currentState == .idle ? idleOverrideAsset : nil
+    guard let asset = forcedAsset ?? idleOverride ?? themeRuntime.resolveAsset(themeId: prefs.theme, snapshot: displaySnapshot, variantId: variant, overrides: overrides),
           FileManager.default.fileExists(atPath: asset.url.path)
     else {
-      webView.isHidden = true
+      pendingSwapWorkItem?.cancel()
+      pendingSwapWorkItem = nil
+      fallbackHideWorkItem?.cancel()
+      fallbackHideWorkItem = nil
+      removePendingWebView()
+      pendingWebView = nil
+      pendingAsset = nil
+      pendingDocument = nil
+      pendingAssetKey = nil
+      detachActiveWebView()
+      imageView.image = nil
+      activeImageFileName = nil
+      imageView.isHidden = true
       fallbackView.isHidden = false
       lastAssetKey = nil
+      activeFileName = nil
       currentAsset = nil
+      activeDocument = nil
+      idleOverrideAsset = nil
+      appKitEyeOffset = .zero
+      resetVisualTrackingDedup()
       return
     }
 
     currentAsset = asset
-    let key = "\(asset.themeId)|\(asset.fileName)|\(asset.state.rawValue)|\(displaySnapshot.sessions.count)|\(forcedAsset?.fileName ?? "")|\(prefs.miniMode)"
+    let key = "\(asset.themeId)|\(asset.fileName)|\(asset.state.rawValue)|\(displaySnapshot.sessions.count)|\(forcedAsset?.fileName ?? "")|\(idleOverride?.fileName ?? "")|\(prefs.miniMode)"
+    if key == pendingAssetKey {
+      return
+    }
     if key == lastAssetKey {
-      webView.isHidden = false
-      fallbackView.isHidden = true
+      prepareImageFallback(asset, document: activeDocument, fadeInMs: 0)
+      if let activeDocument {
+        revealWebLayerIfReady(document: activeDocument, fadeInMs: 0)
+      }
       updateEyeTracking()
       return
     }
+    transition(to: asset, key: key)
+  }
+
+  private static func makeWebView(frame: NSRect) -> WKWebView {
+    let config = WKWebViewConfiguration()
+    config.preferences.javaScriptCanOpenWindowsAutomatically = false
+    let view = WKWebView(frame: frame, configuration: config)
+    view.setValue(false, forKey: "drawsBackground")
+    view.underPageBackgroundColor = .clear
+    view.wantsLayer = true
+    view.layer?.isOpaque = false
+    view.layer?.backgroundColor = NSColor.clear.cgColor
+    view.isHidden = true
+    return view
+  }
+
+  private func transition(to asset: ThemeAsset, key: String) {
+    pendingSwapWorkItem?.cancel()
+    fallbackHideWorkItem?.cancel()
+    fallbackHideWorkItem = nil
+    removePendingWebView()
+    let document = ThemeWebDocumentBuilder.document(for: asset, cacheBust: nextCacheBust())
+    if document.usesLayeredTracking {
+      fallbackHideWorkItem?.cancel()
+      fallbackHideWorkItem = nil
+      pendingAsset = nil
+      pendingDocument = nil
+      pendingAssetKey = nil
+      pendingWebView = nil
+      currentAsset = asset
+      activeDocument = nil
+      lastAssetKey = key
+      activeFileName = asset.fileName
+      detachActiveWebView()
+      prepareImageFallback(asset, document: nil, fadeInMs: transitionFadeInMs(for: asset))
+      resetVisualTrackingDedup()
+      updateEyeTracking()
+      return
+    }
+
+    let next = Self.makeWebView(frame: bounds)
+    next.alphaValue = Self.loadingWebAlpha
+    next.isHidden = false
+    addSubview(next, positioned: .below, relativeTo: badgeView)
+
+    pendingAsset = asset
+    pendingAssetKey = key
+    pendingDocument = document
+    pendingWebView = next
+    pendingFadeInMs = transitionFadeInMs(for: asset)
+    pendingFadeOutMs = transitionFadeOutMs(for: activeFileName, manifest: asset.manifest)
+    let navigationDelegate = PetAssetWebNavigationDelegate { [weak self, weak next] in
+      guard let next else { return }
+      self?.completePendingSwap(next)
+    }
+    pendingNavigationDelegate = navigationDelegate
+    next.navigationDelegate = navigationDelegate
+    loadWebDocument(document, into: next)
+
+    let work = DispatchWorkItem { [weak self, weak next] in
+      guard let next else { return }
+      self?.completePendingSwap(next)
+    }
+    pendingSwapWorkItem = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(120), execute: work)
+  }
+
+  private func completePendingSwap(_ next: WKWebView) {
+    guard pendingWebView === next,
+          let asset = pendingAsset,
+          let document = pendingDocument,
+          let key = pendingAssetKey
+    else { return }
+
+    pendingSwapWorkItem?.cancel()
+    pendingSwapWorkItem = nil
+    pendingWebView = nil
+    pendingNavigationDelegate = nil
+    next.navigationDelegate = nil
+    pendingAsset = nil
+    pendingDocument = nil
+    pendingAssetKey = nil
+
+    let previous = webView
+    webView = next
+    currentAsset = asset
+    activeDocument = document
     lastAssetKey = key
-    webView.isHidden = false
-    fallbackView.isHidden = true
-    webView.loadHTMLString(Self.html(for: asset), baseURL: asset.readAccessURL)
-    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(120)) { [weak self] in
+    resetVisualTrackingDedup()
+    activeFileName = asset.fileName
+    showRenderedAsset(asset, document: document, fadeInMs: pendingFadeInMs)
+
+    removePreviousWebView(previous, durationMs: pendingFadeOutMs)
+    pendingFadeInMs = 0
+    pendingFadeOutMs = 0
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(80)) { [weak self] in
       self?.updateEyeTracking()
     }
   }
 
-  private static func html(for asset: ThemeAsset) -> String {
-    let url = asset.url.absoluteString
-    let bustedURL = "\(url)?_t=\(Int(Date().timeIntervalSince1970 * 1000))"
-    let escaped = bustedURL
-      .replacingOccurrences(of: "&", with: "&amp;")
-      .replacingOccurrences(of: "\"", with: "&quot;")
-    let tag: String
-    if asset.fileName.lowercased().hasSuffix(".svg") {
-      tag = #"<object id="asset" data="\#(escaped)" type="image/svg+xml"></object>"#
-    } else {
-      tag = #"<img id="asset" src="\#(escaped)" />"#
+  private func animateFadeIn(_ view: NSView, durationMs: Int) {
+    guard durationMs > 0 else {
+      view.alphaValue = 1
+      return
     }
-    return """
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <style>
-        html, body {
-          width: 100%;
-          height: 100%;
-          margin: 0;
-          overflow: hidden;
-          background: transparent;
-        }
-        #asset {
-          display: block;
-          width: 100vw;
-          height: 100vh;
-          border: 0;
-          object-fit: contain;
-          image-rendering: auto;
-          transform-origin: center center;
-        }
-      </style>
-      <script>
-        window.clawdSetEye = function(dx, dy, bodyDx, bodyDy, shadowDx, shadowDy) {
-          const asset = document.getElementById('asset');
-          function setTransform(el, x, y) {
-            if (!el) return false;
-            el.style.transformBox = 'fill-box';
-            el.style.transformOrigin = 'center center';
-            el.style.transform = 'translate(' + x + 'px,' + y + 'px)';
-            return true;
-          }
-          let applied = false;
-          try {
-            const doc = asset && asset.contentDocument;
-            if (doc) {
-              applied = setTransform(doc.getElementById('eyes-js'), dx, dy) || applied;
-              applied = setTransform(doc.getElementById('eyes-doze'), dx, dy) || applied;
-              applied = setTransform(doc.getElementById('body-js'), bodyDx, bodyDy) || applied;
-              applied = setTransform(doc.getElementById('shadow-js'), shadowDx, shadowDy) || applied;
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = Double(durationMs) / 1000
+      context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+      view.animator().alphaValue = 1
+    }
+  }
+
+  private func showRenderedAsset(_ asset: ThemeAsset, document: ThemeWebDocument, fadeInMs: Int) {
+    prepareImageFallback(asset, document: document, fadeInMs: fadeInMs)
+    revealWebLayerIfReady(document: document, fadeInMs: fadeInMs)
+  }
+
+  private func prepareImageFallback(_ asset: ThemeAsset, document: ThemeWebDocument?, fadeInMs: Int) {
+    let previousFile = activeImageFileName
+    if imageView.image == nil || activeImageFileName != asset.fileName {
+      if let fallbackSVG = document?.fallbackSVG {
+        imageView.image = NSImage(data: Data(fallbackSVG.utf8))
+      } else {
+        imageView.image = NSImage(contentsOf: asset.url)
+      }
+      activeImageFileName = asset.fileName
+    }
+    let changedImage = previousFile != activeImageFileName
+    imageView.isHidden = imageView.image == nil
+    applyImageFrame(for: asset)
+    fallbackView.isHidden = imageView.image != nil
+    if changedImage, fadeInMs > 0, imageView.image != nil {
+      imageView.alphaValue = 0
+      animateFadeIn(imageView, durationMs: fadeInMs)
+    } else {
+      imageView.alphaValue = 1
+    }
+  }
+
+  private func revealWebLayerIfReady(document: ThemeWebDocument, fadeInMs: Int, attempt: Int = 0) {
+    let candidate = webView
+    if document.usesLayeredTracking {
+      detachActiveWebView()
+      imageView.isHidden = imageView.image == nil
+      fallbackView.isHidden = imageView.image != nil
+      updateEyeTracking()
+      return
+    }
+    candidate.evaluateJavaScript("window.__clawdNativeReady === true") { [weak self, weak candidate] result, _ in
+      DispatchQueue.main.async {
+        guard let self,
+              let candidate,
+              self.webView === candidate,
+              self.activeDocument == document
+        else { return }
+        guard (result as? Bool) == true else {
+          if attempt < 20 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+              self?.revealWebLayerIfReady(document: document, fadeInMs: fadeInMs, attempt: attempt + 1)
             }
-          } catch (_) {}
-          if (!applied && asset) {
-            asset.style.transform = 'translate(' + (dx * 0.25) + 'px,' + (dy * 0.25) + 'px)';
+            return
           }
-        };
-      </script>
-    </head>
-    <body>
-      \(tag)
-    </body>
-    </html>
-    """
+          if document.channel == .inlineSVG {
+            candidate.isHidden = true
+            candidate.alphaValue = 1
+            return
+          }
+          candidate.isHidden = true
+          return
+        }
+        self.revealCandidateWebLayer(candidate, document: document, fadeInMs: fadeInMs)
+      }
+    }
+  }
+
+  private func revealCandidateWebLayer(_ candidate: WKWebView, document: ThemeWebDocument, fadeInMs: Int) {
+    candidate.isHidden = false
+    if fadeInMs > 0 && candidate.alphaValue < 1 {
+      animateFadeIn(candidate, durationMs: fadeInMs)
+    } else {
+      candidate.alphaValue = 1
+    }
+    scheduleFallbackHideAfterWebReveal(candidate, document: document)
+    updateEyeTracking()
+  }
+
+  private func scheduleFallbackHideAfterWebReveal(_ candidate: WKWebView, document: ThemeWebDocument) {
+    fallbackHideWorkItem?.cancel()
+    let delayMs = webRevealFallbackGraceMs(for: document)
+    let hide = DispatchWorkItem { [weak self, weak candidate] in
+      guard let self,
+            let candidate,
+            self.webView === candidate,
+            self.activeDocument == document
+      else { return }
+      self.imageView.isHidden = true
+      self.fallbackView.isHidden = true
+    }
+    fallbackHideWorkItem = hide
+    guard delayMs > 0 else {
+      hide.perform()
+      return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: hide)
+  }
+
+  private func webRevealFallbackGraceMs(for document: ThemeWebDocument) -> Int {
+    switch document.channel {
+    case .inlineSVG, .objectSVG:
+      return 1_800
+    case .image:
+      return 250
+    }
+  }
+
+  private func nextCacheBust() -> String {
+    webCacheBustSeq += 1
+    let millis = Int(Date().timeIntervalSince1970 * 1000)
+    return "\(millis)-\(webCacheBustSeq)"
+  }
+
+  private func applyImageFrame(for asset: ThemeAsset) {
+    let base = ThemeAssetGeometry.mediaFrame(for: asset, in: bounds, imageSize: imageView.image?.size)
+    imageView.frame = base.offsetBy(dx: appKitEyeOffset.width, dy: appKitEyeOffset.height)
+  }
+
+  private func removePreviousWebView(_ previous: WKWebView, durationMs: Int) {
+    guard previous !== webView else { return }
+    guard previous.superview != nil else { return }
+    if durationMs <= 0 {
+      previous.removeFromSuperview()
+      return
+    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = Double(durationMs) / 1000
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      previous.animator().alphaValue = 0
+    } completionHandler: {
+      DispatchQueue.main.async {
+        previous.removeFromSuperview()
+      }
+    }
+  }
+
+  private func loadWebDocument(_ document: ThemeWebDocument, into view: WKWebView) {
+    // A file baseURL leaves WKWebView on about:blank when the native app runs
+    // as a SwiftPM executable; generated asset URLs are already absolute.
+    view.loadHTMLString(document.html, baseURL: nil)
+  }
+
+  private func removePendingWebView() {
+    if let pendingWebView {
+      pendingWebView.navigationDelegate = nil
+      pendingWebView.removeFromSuperview()
+    }
+    pendingNavigationDelegate = nil
+  }
+
+  private func transitionFadeInMs(for asset: ThemeAsset) -> Int {
+    max(0, asset.manifest.transitions?[Self.baseName(asset.fileName)]?.fadeIn ?? 0)
+  }
+
+  private func transitionFadeOutMs(for fileName: String?, manifest: ThemeManifest) -> Int {
+    guard let fileName else { return 0 }
+    return max(0, manifest.transitions?[Self.baseName(fileName)]?.fadeOut ?? 0)
+  }
+
+  private static func baseName(_ value: String) -> String {
+    (value as NSString).lastPathComponent
   }
 
   override func mouseMoved(with event: NSEvent) {
-    updateEyeTracking()
+    updateVisualTracking(force: true)
   }
 
   override func mouseEntered(with event: NSEvent) {
-    updateEyeTracking()
+    updateVisualTracking(force: true)
+    miniHoverChanged?(true)
   }
 
   override func mouseExited(with event: NSEvent) {
-    applyEyeOffset(dx: 0, dy: 0)
+    updateVisualTracking(force: true)
+    miniHoverChanged?(false)
   }
 
   override func mouseDown(with event: NSEvent) {
     dragStartMouse = NSEvent.mouseLocation
     dragStartFrame = window?.frame
+    draggingWindow = false
     if event.clickCount >= 4 {
       playReaction("annoyed", side: nil)
     } else if event.clickCount == 2 {
@@ -214,6 +500,10 @@ final class PetAssetView: NSView {
   }
 
   override func mouseDragged(with event: NSEvent) {
+    if !draggingWindow {
+      draggingWindow = true
+      dragDidStart?()
+    }
     if forcedAsset == nil {
       playReaction("drag", side: nil, autoReset: false)
     }
@@ -225,10 +515,17 @@ final class PetAssetView: NSView {
   }
 
   override func mouseUp(with event: NSEvent) {
+    let completedDrag = draggingWindow
     dragStartMouse = nil
     dragStartFrame = nil
+    draggingWindow = false
     if forcedAsset?.fileName.contains("drag") == true {
       clearReaction()
+    }
+    if completedDrag {
+      dragDidEnd?()
+    } else {
+      petClicked?()
     }
   }
 
@@ -258,23 +555,162 @@ final class PetAssetView: NSView {
     render()
   }
 
-  private func updateEyeTracking() {
+  func playIdleAnimation(fileName: String, durationMs: Int) {
+    let prefs = preferences()
+    let theme = prefs.theme
+    guard let asset = themeRuntime.resolveAsset(
+      themeId: theme,
+      fileName: fileName,
+      state: .idle,
+      variantId: prefs.themeVariant[theme] ?? "default",
+      overrides: prefs.themeOverrides[theme]
+    ) else { return }
+    idleResetWorkItem?.cancel()
+    idleOverrideAsset = asset
+    lastAssetKey = nil
+    render()
+    let work = DispatchWorkItem { [weak self] in
+      guard self?.idleOverrideAsset?.fileName == asset.fileName else { return }
+      self?.clearIdleAnimation()
+    }
+    idleResetWorkItem = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(durationMs, 0)), execute: work)
+  }
+
+  func playTemporaryState(_ state: ClawdState, durationMs: Int) {
+    let prefs = preferences()
+    let theme = prefs.theme
+    let snapshot = StateSnapshot(currentState: state, sessions: [], updatedAt: Date())
+    guard let asset = themeRuntime.resolveAsset(
+      themeId: theme,
+      snapshot: snapshot,
+      variantId: prefs.themeVariant[theme] ?? "default",
+      overrides: prefs.themeOverrides[theme]
+    ) else { return }
+    reactionResetWorkItem?.cancel()
+    forcedAsset = asset
+    lastAssetKey = nil
+    render()
+    let work = DispatchWorkItem { [weak self] in
+      guard self?.forcedAsset?.state == state else { return }
+      self?.clearReaction()
+    }
+    reactionResetWorkItem = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(durationMs, 0)), execute: work)
+  }
+
+  func clearIdleAnimation() {
+    idleResetWorkItem?.cancel()
+    idleResetWorkItem = nil
+    guard idleOverrideAsset != nil else { return }
+    idleOverrideAsset = nil
+    lastAssetKey = nil
+    render()
+  }
+
+  func setMiniPeekActive(_ active: Bool) {
+    guard miniPeekActive != active else { return }
+    miniPeekActive = active
+    lastAssetKey = nil
+    render()
+  }
+
+  func setMiniClip(_ clip: MiniModeLayout.Clip?) {
+    if miniClip == clip { return }
+    miniClip = clip
+    applyMiniClip()
+  }
+
+  private func startVisualTracking() {
+    guard visualTrackingTimer == nil else { return }
+    let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+      Task { @MainActor in
+        self?.updateVisualTracking()
+      }
+    }
+    visualTrackingTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  private func resetVisualTrackingDedup() {
+    lastCursorScreenPoint = nil
+    lastTrackingAssetKey = nil
+    lastEyeOffset = nil
+    lastPointerPayload = nil
+  }
+
+  private func updateVisualTracking(force: Bool = false) {
     guard let asset = currentAsset else { return }
-    guard asset.manifest.eyeTracking?.enabled == true else {
-      applyEyeOffset(dx: 0, dy: 0)
+    let cursor = NSEvent.mouseLocation
+    let trackingKey = "\(asset.themeId)|\(asset.fileName)|\(asset.state.rawValue)"
+    let cursorMoved = lastCursorScreenPoint != cursor
+    let assetChanged = lastTrackingAssetKey != trackingKey
+    guard force || cursorMoved || assetChanged else { return }
+    lastCursorScreenPoint = cursor
+    lastTrackingAssetKey = trackingKey
+
+    updateCloudlingPointerBridge(asset: asset, cursor: cursor, force: force || assetChanged)
+
+    guard let windowFrame = window?.frame,
+          let eye = ThemeAssetGeometry.eyeOffset(
+            for: asset,
+            windowFrame: windowFrame,
+            viewBounds: bounds,
+            cursorScreenPoint: cursor,
+            imageSize: imageView.image?.size
+          )
+    else {
+      if force || lastEyeOffset != nil || assetChanged {
+        lastEyeOffset = nil
+        applyEyeOffset(dx: 0, dy: 0)
+      }
       return
     }
-    let allowed = Set(asset.manifest.eyeTracking?.states ?? [])
-    if !allowed.isEmpty && !allowed.contains(asset.state.rawValue) {
-      applyEyeOffset(dx: 0, dy: 0)
+
+    if !force, lastEyeOffset == eye { return }
+    lastEyeOffset = eye
+    applyEyeOffset(dx: eye.dx, dy: eye.dy)
+  }
+
+  private func updateCloudlingPointerBridge(asset: ThemeAsset, cursor: NSPoint, force: Bool) {
+    guard usesCloudlingPointerBridge(asset),
+          let windowFrame = window?.frame,
+          let payload = ThemeAssetGeometry.pointerPayload(
+            for: asset,
+            windowFrame: windowFrame,
+            viewBounds: bounds,
+            cursorScreenPoint: cursor,
+            imageSize: imageView.image?.size
+          )
+    else {
+      if force || lastPointerPayload != nil {
+        lastPointerPayload = nil
+        clearCloudlingPointerBridge()
+      }
       return
     }
-    let location = convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
-    let center = NSPoint(x: bounds.midX, y: bounds.midY)
-    let maxOffset = CGFloat(asset.manifest.eyeTracking?.maxOffset ?? 3)
-    let dx = max(-maxOffset, min(maxOffset, (location.x - center.x) / max(bounds.width, 1) * maxOffset * 2))
-    let dy = max(-maxOffset, min(maxOffset, (center.y - location.y) / max(bounds.height, 1) * maxOffset * 2))
-    applyEyeOffset(dx: dx, dy: dy)
+    let displayed = ThemeAssetGeometry.PointerPayload(x: payload.x, y: payload.y, inside: true)
+    guard force || pointerPayloadChanged(displayed, lastPointerPayload) else { return }
+    lastPointerPayload = displayed
+    applyCloudlingPointerBridge(displayed)
+  }
+
+  private func usesCloudlingPointerBridge(_ asset: ThemeAsset) -> Bool {
+    guard asset.fileName.lowercased().hasSuffix(".svg"),
+          asset.manifest.trustedRuntime?.scriptedSvgFiles?.contains(Self.baseName(asset.fileName)) == true
+    else { return false }
+    return asset.state == .idle || asset.state == .miniIdle || asset.state == .miniPeek
+  }
+
+  private func pointerPayloadChanged(_ lhs: ThemeAssetGeometry.PointerPayload, _ rhs: ThemeAssetGeometry.PointerPayload?) -> Bool {
+    guard let rhs else { return true }
+    return lhs.inside != rhs.inside
+      || abs(lhs.x - rhs.x) > 0.01
+      || abs(lhs.y - rhs.y) > 0.01
+  }
+
+  private func updateEyeTracking() {
+    updateVisualTracking(force: true)
   }
 
   private func miniMappedSnapshot(_ snapshot: StateSnapshot, preferences: Preferences) -> StateSnapshot {
@@ -292,34 +728,102 @@ final class PetAssetView: NSView {
     default:
       mapped = .miniIdle
     }
+    if miniPeekActive, mapped == .miniIdle {
+      return StateSnapshot(currentState: .miniPeek, sessions: snapshot.sessions, updatedAt: snapshot.updatedAt)
+    }
     return StateSnapshot(currentState: mapped, sessions: snapshot.sessions, updatedAt: snapshot.updatedAt)
   }
 
   private func applyEyeOffset(dx: CGFloat, dy: CGFloat) {
     fallbackView.eyeOffset = NSPoint(x: dx, y: dy)
-    let script = "window.clawdSetEye && window.clawdSetEye(\(Double(dx)), \(Double(dy)), \(Double(dx * 0.25)), \(Double(dy * 0.25)), \(Double(dx * -0.15)), \(Double(dy * -0.05)))"
+    appKitEyeOffset = ThemeAssetGeometry.appKitFallbackEyeOffset(dx: dx, dy: dy)
+    if let currentAsset {
+      applyImageFrame(for: currentAsset)
+    }
+    if webView.superview != nil {
+      let script = "window.clawdSetEye && window.clawdSetEye(\(Double(dx)), \(Double(dy)), \(Double(dx * 0.25)), \(Double(dy * 0.25)), \(Double(dx * -0.15)), \(Double(dy * -0.05)))"
+      webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+  }
+
+  private func applyCloudlingPointerBridge(_ payload: ThemeAssetGeometry.PointerPayload) {
+    guard webView.superview != nil else { return }
+    let script = """
+    window.__cloudlingSetPointer && window.__cloudlingSetPointer({
+      x: \(Double(payload.x)),
+      y: \(Double(payload.y)),
+      inside: \(payload.inside ? "true" : "false")
+    })
+    """
     webView.evaluateJavaScript(script, completionHandler: nil)
+  }
+
+  private func clearCloudlingPointerBridge() {
+    guard webView.superview != nil else { return }
+    webView.evaluateJavaScript(
+      "window.__cloudlingSetPointer && window.__cloudlingSetPointer({ x: 0, y: 0, inside: false })",
+      completionHandler: nil
+    )
+  }
+
+  private func detachActiveWebView() {
+    webView.stopLoading()
+    webView.isHidden = true
+    webView.alphaValue = 1
+    webView.removeFromSuperview()
+  }
+
+  private func applyMiniClip() {
+    guard let layer else { return }
+    guard let clipRect = miniClipRect() else {
+      layer.mask = nil
+      return
+    }
+    let mask = CALayer()
+    mask.backgroundColor = NSColor.black.cgColor
+    mask.frame = clipRect
+    layer.mask = mask
+  }
+
+  private func miniClipRect() -> NSRect? {
+    guard let miniClip else { return nil }
+    let fraction = min(max(miniClip.fraction, 0), 1)
+    switch miniClip.edge {
+    case .left:
+      let x = bounds.width * fraction
+      return NSRect(x: x, y: 0, width: bounds.width - x, height: bounds.height)
+    case .right:
+      return NSRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height)
+    }
   }
 
   private func hitRect(for asset: ThemeAsset) -> NSRect? {
     let prefs = preferences()
     guard let loaded = try? themeRuntime.loadTheme(id: asset.themeId, variantId: prefs.themeVariant[asset.themeId] ?? "default", overrides: prefs.themeOverrides[asset.themeId]),
-          let hitBox = loaded.hitBox(for: asset),
-          let viewBox = asset.manifest.viewBox
+          let hitBox = loaded.hitBox(for: asset)
     else { return nil }
-    let fit = aspectFitRect(content: NSSize(width: viewBox.width, height: viewBox.height), in: bounds)
-    let scaleX = fit.width / max(viewBox.width, 1)
-    let scaleY = fit.height / max(viewBox.height, 1)
-    let x = fit.minX + CGFloat(hitBox.x - viewBox.x) * scaleX
-    let yFromTop = CGFloat(hitBox.y - viewBox.y + hitBox.h) * scaleY
-    let y = fit.maxY - yFromTop
-    return NSRect(x: x, y: y, width: CGFloat(hitBox.w) * scaleX, height: CGFloat(hitBox.h) * scaleY).insetBy(dx: -6, dy: -6)
+    return ThemeAssetGeometry.hitRect(for: asset, hitBox: hitBox, in: bounds, imageSize: imageView.image?.size)
+  }
+}
+
+@MainActor
+private final class PetAssetWebNavigationDelegate: NSObject, WKNavigationDelegate {
+  private let completion: () -> Void
+
+  init(completion: @escaping () -> Void) {
+    self.completion = completion
   }
 
-  private func aspectFitRect(content: NSSize, in outer: NSRect) -> NSRect {
-    let scale = min(outer.width / max(content.width, 1), outer.height / max(content.height, 1))
-    let size = NSSize(width: content.width * scale, height: content.height * scale)
-    return NSRect(x: outer.midX - size.width / 2, y: outer.midY - size.height / 2, width: size.width, height: size.height)
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    completion()
+  }
+
+  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    completion()
+  }
+
+  func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    completion()
   }
 }
 

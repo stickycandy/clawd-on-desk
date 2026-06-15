@@ -18,6 +18,20 @@ public struct ThemeAsset: Equatable, Sendable {
   }
 }
 
+public struct ThemeSound: Equatable, Sendable {
+  public var themeId: String
+  public var name: String
+  public var fileName: String
+  public var url: URL
+
+  public init(themeId: String, name: String, fileName: String, url: URL) {
+    self.themeId = themeId
+    self.name = name
+    self.fileName = fileName
+    self.url = url
+  }
+}
+
 public final class ThemeRuntime: @unchecked Sendable {
   public let projectRoot: URL
   public let userThemesRoot: URL
@@ -86,6 +100,11 @@ public final class ThemeRuntime: @unchecked Sendable {
     return (loaded.makeAsset(fileName: file.lastPathComponent, state: .attention), descriptor.duration)
   }
 
+  public func resolveSound(themeId: String, name: String, variantId: String = "default", overrides: JSONValue? = nil) -> ThemeSound? {
+    guard let loaded = try? loadTheme(id: themeId, variantId: variantId, overrides: overrides) else { return nil }
+    return loaded.resolveSound(name: name)
+  }
+
   public enum ThemeRuntimeError: Error, Equatable {
     case themeNotFound(String)
   }
@@ -109,6 +128,13 @@ public struct LoadedTheme: Equatable, Sendable {
     let url = resolveAssetURL(fileName: fileName)
     let readAccess = readAccessURL(for: url)
     return ThemeAsset(themeId: id, state: state, fileName: fileName, url: url, readAccessURL: readAccess, manifest: manifest)
+  }
+
+  public func resolveSound(name: String) -> ThemeSound? {
+    guard let fileName = manifest.soundFile(named: name),
+          let url = resolveSoundURL(fileName: fileName)
+    else { return nil }
+    return ThemeSound(themeId: id, name: name, fileName: fileName, url: url)
   }
 
   public func hitBox(for asset: ThemeAsset) -> ThemeManifest.HitBox? {
@@ -170,6 +196,25 @@ public struct LoadedTheme: Equatable, Sendable {
     return themeDirectory.appendingPathComponent("assets", isDirectory: true).appendingPathComponent(safe)
   }
 
+  public func resolveSoundURL(fileName: String) -> URL? {
+    let safe = fileName.lastPathComponent
+    let bundled = projectRoot
+      .appendingPathComponent("assets", isDirectory: true)
+      .appendingPathComponent("sounds", isDirectory: true)
+      .appendingPathComponent(safe)
+    if isBuiltIn {
+      return FileManager.default.fileExists(atPath: bundled.path) ? bundled : nil
+    }
+
+    let themeSound = themeDirectory
+      .appendingPathComponent("sounds", isDirectory: true)
+      .appendingPathComponent(safe)
+    if FileManager.default.fileExists(atPath: themeSound.path) {
+      return themeSound
+    }
+    return FileManager.default.fileExists(atPath: bundled.path) ? bundled : nil
+  }
+
   private func readAccessURL(for assetURL: URL) -> URL {
     if isBuiltIn {
       return projectRoot
@@ -206,7 +251,7 @@ public struct LoadedTheme: Equatable, Sendable {
       case .miniSleep, .miniEnterSleep:
         return [state, .sleeping, .idle]
       case .miniWorking:
-        return [.miniWorking, .working, .idle]
+        return [.miniWorking, .miniIdle, .idle]
       default:
         return [state, .idle]
       }

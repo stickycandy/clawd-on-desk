@@ -5,14 +5,60 @@ import ClawdNativeCore
 final class PermissionBubbleWindowController: NSWindowController, NSWindowDelegate {
   private var permission: PendingPermission?
   private var resolved = false
+  private var autoCloseTimer: Timer?
   private static var visible: [PermissionBubbleWindowController] = []
+  private static var lastPreferences: Preferences?
+  private static weak var lastPetWindow: NSWindow?
 
-  static func show(_ permission: PendingPermission) {
+  static func show(_ permission: PendingPermission, preferences: Preferences, petWindow: NSWindow?) {
+    guard preferences.permissionBubblesEnabled, !preferences.hideBubbles else {
+      permission.resolve(.noDecision)
+      return
+    }
     let controller = PermissionBubbleWindowController(permission: permission)
     visible.append(controller)
     controller.showWindow(nil)
     controller.window?.makeKeyAndOrderFront(nil)
-    reposition()
+    controller.armAutoClose(preferences: preferences)
+    reposition(preferences: preferences, petWindow: petWindow)
+  }
+
+  static func applyPreferences(_ preferences: Preferences, petWindow: NSWindow?) {
+    if !preferences.permissionBubblesEnabled || preferences.hideBubbles {
+      dismissAllWithoutDecision()
+      return
+    }
+    for controller in visible {
+      controller.armAutoClose(preferences: preferences)
+    }
+    reposition(preferences: preferences, petWindow: petWindow)
+  }
+
+  static func reposition(preferences: Preferences, petWindow: NSWindow?) {
+    lastPreferences = preferences
+    lastPetWindow = petWindow
+    FloatingBubbleStackCoordinator.reposition(preferences: preferences, petWindow: petWindow)
+  }
+
+  static func stackEntries() -> [FloatingBubbleStackEntry] {
+    visible.map { controller in
+      FloatingBubbleStackEntry(
+        createdAt: controller.permission?.createdAt ?? Date.distantPast,
+        height: controller.window?.frame.height ?? controller.estimatedHeight,
+        setFrame: { frame in
+          controller.window?.setFrame(frame, display: true)
+        }
+      )
+    }
+  }
+
+  static func dismissAllWithoutDecision() {
+    let controllers = visible
+    for controller in controllers {
+      controller.resolved = true
+      controller.permission?.resolve(.noDecision)
+      controller.close()
+    }
   }
 
   init(permission: PendingPermission) {
@@ -36,11 +82,15 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
   }
 
   func windowWillClose(_ notification: Notification) {
+    autoCloseTimer?.invalidate()
+    autoCloseTimer = nil
     if !resolved {
       permission?.resolve(.noDecision)
     }
     Self.visible.removeAll { $0 === self }
-    Self.reposition()
+    if let preferences = Self.lastPreferences {
+      Self.reposition(preferences: preferences, petWindow: Self.lastPetWindow)
+    }
   }
 
   @objc private func allow() {
@@ -126,6 +176,28 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     return root
   }
 
+  private var estimatedHeight: CGFloat {
+    260 + CGFloat(permission?.request.suggestions.count ?? 0) * 37
+  }
+
+  private func armAutoClose(preferences: Preferences) {
+    autoCloseTimer?.invalidate()
+    autoCloseTimer = nil
+    let seconds = preferences.permissionBubbleAutoCloseSeconds
+    guard seconds > 0, let permission else { return }
+    let elapsed = Date().timeIntervalSince(permission.createdAt)
+    let remaining = TimeInterval(seconds) - max(elapsed, 0)
+    guard remaining > 0 else {
+      noDecision()
+      return
+    }
+    autoCloseTimer = Timer.scheduledTimer(withTimeInterval: remaining, repeats: false) { [weak self] _ in
+      Task { @MainActor in
+        self?.noDecision()
+      }
+    }
+  }
+
   @objc private func applySuggestion(_ sender: NSButton) {
     guard let suggestion = (sender as? SuggestionButton)?.suggestion else { return }
     resolved = true
@@ -134,16 +206,6 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     close()
   }
 
-  private static func reposition() {
-    guard let screen = NSScreen.main else { return }
-    var y = screen.visibleFrame.minY + 28
-    for controller in visible.reversed() {
-      guard let window = controller.window else { continue }
-      let x = screen.visibleFrame.maxX - window.frame.width - 28
-      window.setFrameOrigin(NSPoint(x: x, y: y))
-      y += window.frame.height + 10
-    }
-  }
 }
 
 @MainActor

@@ -34,10 +34,19 @@ public struct NativeHookRuntime {
     }
   }
 
-  public static func runtimePort(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> Int? {
-    let url = homeDirectory
-      .appendingPathComponent(".clawd", isDirectory: true)
-      .appendingPathComponent("runtime.json")
+  public static func runtimePort(
+    homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> Int? {
+    let url: URL
+    if let explicit = environment["CLAWD_NATIVE_RUNTIME_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !explicit.isEmpty {
+      url = URL(fileURLWithPath: explicit)
+    } else {
+      url = homeDirectory
+        .appendingPathComponent(".clawd", isDirectory: true)
+        .appendingPathComponent("runtime.json")
+    }
     guard let data = try? Data(contentsOf: url),
           let object = try? JSONDecoder().decode([String: JSONValue].self, from: data),
           case .number(let port)? = object["port"],
@@ -109,10 +118,11 @@ public struct NativeHookRuntime {
 
   private func codexRoute(payload: [String: JSONValue]) -> Route {
     let hookEvent = payload.string("hook_event_name") ?? event
+    let sessionMeta = firstCodexSessionMeta(path: payload.string("transcript_path"))
     if hookEvent == "PermissionRequest" {
       var body = basePermission(
         agentId: "codex",
-        sessionId: normalizeSessionId(payload.string("session_id"), prefix: "codex"),
+        sessionId: codexSessionId(payload: payload),
         toolName: payload.string("tool_name") ?? "Unknown",
         payload: payload
       )
@@ -120,21 +130,21 @@ public struct NativeHookRuntime {
       if let description = payload.object("tool_input")?.string("description") {
         body["tool_input_description"] = .string(String(description.prefix(500)))
       }
-      addCodexFields(payload: payload, body: &body)
+      addCodexFields(payload: payload, sessionMeta: sessionMeta, body: &body)
       return .permission(.object(body))
     }
     guard let state = Self.codexState[hookEvent] else { return .none }
     if hookEvent == "Stop", payload.bool("stop_hook_active") == true { return .none }
     var body = baseState(
       state: state,
-      sessionId: normalizeSessionId(payload.string("session_id"), prefix: "codex"),
+      sessionId: codexSessionId(payload: payload),
       event: hookEvent,
       agentId: "codex",
       payload: payload
     )
     body["hook_source"] = .string("codex-official")
     addToolMetadata(payload: payload, body: &body)
-    addCodexFields(payload: payload, body: &body)
+    addCodexFields(payload: payload, sessionMeta: sessionMeta, body: &body)
     if let title = codexThreadName(sessionId: body.string("session_id")) {
       body["session_title"] = .string(title)
     }
@@ -161,6 +171,7 @@ public struct NativeHookRuntime {
         payload: payload
       )
       addToolMetadata(payload: payload, body: &body)
+      body["permission_suggestions"] = .array([])
       return .permission(.object(body))
     }
     guard let state = Self.qwenState[hookEvent] else { return .none }
@@ -317,13 +328,120 @@ public struct NativeHookRuntime {
     }
   }
 
-  private func addCodexFields(payload: [String: JSONValue], body: inout [String: JSONValue]) {
-    if let originator = payload.string("originator"), !originator.isEmpty {
+  private func addCodexFields(payload: [String: JSONValue], sessionMeta: [String: JSONValue]?, body: inout [String: JSONValue]) {
+    if let role = resolveCodexSessionRole(payload: payload, sessionMeta: sessionMeta) {
+      body["codex_session_role"] = .string(role)
+    }
+    if let originator = firstNonEmpty(sessionMeta?.string("originator"), payload.string("originator")) {
       body["codex_originator"] = .string(originator)
     }
-    if let source = payload.string("source"), !source.isEmpty {
+    if let source = firstNonEmpty(sessionMeta?.string("source"), payload.string("source")) {
       body["codex_source"] = .string(source)
     }
+    if let upstreamAgentId = firstNonEmpty(payload.string("agent_id"), sessionMeta?.string("agent_id")) {
+      body["codex_subagent_id"] = .string(upstreamAgentId)
+    }
+    if let upstreamAgentType = firstNonEmpty(payload.string("agent_type"), sessionMeta?.string("agent_type")) {
+      body["codex_agent_type"] = .string(upstreamAgentType)
+    }
+  }
+
+  private func codexSessionId(payload: [String: JSONValue]) -> String {
+    normalizeSessionId(extractCodexSessionId(fromTranscriptPath: payload.string("transcript_path")) ?? payload.string("session_id"), prefix: "codex")
+  }
+
+  private func extractCodexSessionId(fromTranscriptPath path: String?) -> String? {
+    guard let path = path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else { return nil }
+    let fileName = URL(fileURLWithPath: path).lastPathComponent
+    let pattern = #"^rollout-.+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$"#
+    guard let regex = try? NSRegularExpression(pattern: pattern),
+          let match = regex.firstMatch(in: fileName, range: NSRange(fileName.startIndex..<fileName.endIndex, in: fileName)),
+          match.numberOfRanges > 1,
+          let range = Range(match.range(at: 1), in: fileName)
+    else { return nil }
+    return String(fileName[range])
+  }
+
+  private func firstCodexSessionMeta(path: String?) -> [String: JSONValue]? {
+    guard let path = path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else { return nil }
+    guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return nil }
+    defer { try? handle.close() }
+    let data = (try? handle.read(upToCount: 262_144)) ?? Data()
+    guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return nil }
+    return text.components(separatedBy: CharacterSet.newlines).compactMap(parseCodexSessionMetaLine).first
+  }
+
+  private func parseCodexSessionMetaLine(_ line: String) -> [String: JSONValue]? {
+    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8),
+          case .object(let record) = try? JSONDecoder().decode(JSONValue.self, from: data),
+          record.string("type") == "session_meta",
+          let payload = record.object("payload")
+    else { return nil }
+    return payload
+  }
+
+  private func resolveCodexSessionRole(payload: [String: JSONValue], sessionMeta: [String: JSONValue]?) -> String? {
+    classifyCodexHookPayload(payload) ?? classifyCodexSessionMeta(sessionMeta)
+  }
+
+  private func classifyCodexHookPayload(_ payload: [String: JSONValue]) -> String? {
+    normalizedCodexRole(payload.string("codex_session_role"))
+      ?? classifyCodexSource(payload["source"])
+      ?? normalizedCodexRole(payload.string("agent_role"))
+      ?? normalizedCodexRole(payload.string("agent_type"))
+      ?? codexParentRole(payload)
+  }
+
+  private func classifyCodexSessionMeta(_ sessionMeta: [String: JSONValue]?) -> String? {
+    guard let sessionMeta else { return nil }
+    return classifyCodexSource(sessionMeta["source"])
+      ?? normalizedCodexRole(sessionMeta.string("codex_session_role"))
+      ?? normalizedCodexRole(sessionMeta.string("agent_role"))
+      ?? normalizedCodexRole(sessionMeta.string("agent_type"))
+      ?? codexParentRole(sessionMeta)
+  }
+
+  private func classifyCodexSource(_ source: JSONValue?) -> String? {
+    switch source {
+    case .object(let object):
+      if let subagent = object["subagent"] {
+        return subagent == .bool(false) || subagent == .null ? "root" : "subagent"
+      }
+      return normalizedCodexRole(object.string("role") ?? object.string("type") ?? object.string("kind"))
+    case .string(let value):
+      let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      if normalized == "subagent" || normalized == "agent-subagent" { return "subagent" }
+      if normalized == "cli" || normalized == "codex-cli" || normalized == "codex-tui" { return "root" }
+      return nil
+    default:
+      return nil
+    }
+  }
+
+  private func normalizedCodexRole(_ value: String?) -> String? {
+    let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    guard !normalized.isEmpty else { return nil }
+    if normalized == "root" || normalized == "main" || normalized == "primary" { return "root" }
+    if ["subagent", "child", "delegate", "delegated", "explorer", "worker"].contains(normalized) {
+      return "subagent"
+    }
+    return nil
+  }
+
+  private func codexParentRole(_ object: [String: JSONValue]) -> String? {
+    if firstNonEmpty(object.string("parent_session_id"), object.string("parent_thread_id")) != nil {
+      return "subagent"
+    }
+    return nil
+  }
+
+  private func firstNonEmpty(_ values: String?...) -> String? {
+    for value in values {
+      let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      if !trimmed.isEmpty { return trimmed }
+    }
+    return nil
   }
 
   private func normalizeSessionId(_ value: String?, prefix: String) -> String {

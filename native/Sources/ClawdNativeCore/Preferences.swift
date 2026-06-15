@@ -256,7 +256,7 @@ public struct Preferences: Codable, Equatable, Sendable {
     hideBubbles: Bool = false,
     permissionBubblesEnabled: Bool = true,
     autoApproveAllPermissions: Bool = false,
-    notificationBubbleAutoCloseSeconds: Int = 30,
+    notificationBubbleAutoCloseSeconds: Int = 6,
     permissionBubbleAutoCloseSeconds: Int = 0,
     updateBubbleAutoCloseSeconds: Int = 12,
     soundMuted: Bool = false,
@@ -680,8 +680,12 @@ public final class PreferencesStore: @unchecked Sendable {
     self.snapshot = PreferencesStore.load(from: url)
   }
 
-  public static func defaultURL() -> URL {
-    FileManager.default.homeDirectoryForCurrentUser
+  public static func defaultURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+    if let explicit = environment["CLAWD_NATIVE_PREFS_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !explicit.isEmpty {
+      return URL(fileURLWithPath: explicit)
+    }
+    return FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent(".clawd", isDirectory: true)
       .appendingPathComponent("clawd-prefs-native.json")
   }
