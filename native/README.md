@@ -75,6 +75,12 @@ not stuck on a static fallback frame:
 bash scripts/smoke-calico-apng-motion.sh
 ```
 
+To run the targeted motion checks for all three renderer channels together:
+
+```bash
+bash scripts/smoke-motion-suite.sh
+```
+
 All smoke scripts print the generated screenshot path or smoke root. The
 Session HUD smoke accepts an optional screenshot path, the cross-theme smoke
 scripts accept an optional output directory argument, and the transition smoke
