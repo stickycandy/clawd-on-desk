@@ -108,6 +108,36 @@ function summarizeSuiteManifest(manifest) {
   };
 }
 
+function summarizeCompareManifest(manifest) {
+  const compareStatus = manifest.compareStatus && typeof manifest.compareStatus === "object"
+    ? manifest.compareStatus
+    : null;
+  const directResults = Array.isArray(manifest.results) ? manifest.results : null;
+  const directFailures = Array.isArray(manifest.failures) ? manifest.failures : null;
+  const hasCompare = !!compareStatus || !!directResults;
+  const pairs = compareStatus && Number.isFinite(compareStatus.results)
+    ? compareStatus.results
+    : (directResults ? directResults.length : 0);
+  const failures = compareStatus && Number.isFinite(compareStatus.failures)
+    ? compareStatus.failures
+    : (directFailures ? directFailures.length : 0);
+  const passed = hasCompare
+    ? (
+        compareStatus && typeof compareStatus.passed === "boolean"
+          ? compareStatus.passed
+          : (typeof manifest.passed === "boolean" ? manifest.passed : null)
+      )
+    : null;
+
+  return {
+    comparePairs: pairs,
+    maxChangedRatio: finiteOrNull(compareStatus?.maxChangedRatio ?? manifest.maxChangedRatio),
+    maxMeanDelta: finiteOrNull(compareStatus?.maxMeanDelta ?? manifest.maxMeanDelta),
+    compareFailures: failures,
+    comparePassed: passed,
+  };
+}
+
 function minOf(items, key) {
   const values = items.map((item) => item[key]).filter(Number.isFinite);
   return values.length > 0 ? Math.min(...values) : NaN;
@@ -118,16 +148,18 @@ function summarizeManifest(file) {
   const summary = Array.isArray(manifest.checks)
     ? summarizeSuiteManifest(manifest)
     : summarizeVerifierManifest(manifest);
+  const compare = summarizeCompareManifest(manifest);
   return {
     file,
     generatedAt: manifest.generatedAt || "-",
     ...summary,
+    ...compare,
   };
 }
 
 function printMarkdown(rows) {
-  console.log("| Manifest | Generated | Screenshots | Min colors | Min luminance | Motion ratios |");
-  console.log("| --- | --- | ---: | ---: | ---: | --- |");
+  console.log("| Manifest | Generated | Screenshots | Min colors | Min luminance | Motion ratios | Compare pairs | Max changed | Max mean | Compare failures |");
+  console.log("| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |");
   for (const row of rows) {
     const motion = row.motionRatios.length > 0
       ? row.motionRatios.map((ratio) => ratio.toFixed(4)).join(", ")
@@ -139,6 +171,10 @@ function printMarkdown(rows) {
       numberOrDash(row.minUniqueColors),
       numberOrDash(row.minLuminanceRange),
       escapeMarkdown(motion),
+      numberOrDash(row.comparePairs),
+      numberOrDash(row.maxChangedRatio, 6),
+      numberOrDash(row.maxMeanDelta, 3),
+      numberOrDash(row.compareFailures),
     ].join(" | ").replace(/^/, "| ").replace(/$/, " |"));
   }
 }
@@ -160,11 +196,24 @@ function findMotionFailures(rows, minMotionRatio) {
   return failures;
 }
 
+function findCompareFailures(rows) {
+  return rows
+    .filter((row) => row.comparePassed === false || row.compareFailures > 0)
+    .map((row) => ({
+      file: row.file,
+      passed: row.comparePassed,
+      failures: row.compareFailures,
+      maxChangedRatio: row.maxChangedRatio,
+      maxMeanDelta: row.maxMeanDelta,
+    }));
+}
+
 function writeJson(file, rows, options = {}) {
   const minMotionRatio = Number.isFinite(options.minMotionRatio)
     ? options.minMotionRatio
     : null;
   const motionFailures = options.motionFailures || [];
+  const compareFailures = options.compareFailures || [];
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify({
     generatedAt: new Date().toISOString(),
@@ -172,8 +221,9 @@ function writeJson(file, rows, options = {}) {
     thresholds: {
       minMotionRatio,
     },
-    passed: motionFailures.length === 0,
+    passed: motionFailures.length === 0 && compareFailures.length === 0,
     motionFailures,
+    compareFailures,
     manifests: rows.map((row) => ({
       file: row.file,
       relativeFile: path.relative(process.cwd(), row.file) || path.basename(row.file),
@@ -182,6 +232,11 @@ function writeJson(file, rows, options = {}) {
       minUniqueColors: finiteOrNull(row.minUniqueColors),
       minLuminanceRange: finiteOrNull(row.minLuminanceRange),
       motionRatios: row.motionRatios,
+      comparePairs: row.comparePairs,
+      maxChangedRatio: row.maxChangedRatio,
+      maxMeanDelta: row.maxMeanDelta,
+      compareFailures: row.compareFailures,
+      comparePassed: row.comparePassed,
     })),
   }, null, 2)}\n`);
 }
@@ -207,10 +262,12 @@ function main() {
 
   const rows = manifestPaths.map(summarizeManifest);
   const motionFailures = findMotionFailures(rows, args.minMotionRatio);
+  const compareFailures = findCompareFailures(rows);
   if (args.json) {
     writeJson(args.json, rows, {
       minMotionRatio: args.minMotionRatio,
       motionFailures,
+      compareFailures,
     });
   }
   printMarkdown(rows);
@@ -220,6 +277,9 @@ function main() {
   }
   if (motionFailures.length > 0) {
     fail(`${motionFailures.length} motion ratio(s) below threshold ${args.minMotionRatio}`);
+  }
+  if (compareFailures.length > 0) {
+    fail(`${compareFailures.length} compare manifest(s) failed`);
   }
 }
 

@@ -16,6 +16,7 @@ Suites:
   state         Cross-theme desktop/mini state matrix smoke
   transitions   Cross-theme transition smoke
   hud           Session HUD click-reveal smoke
+  desktop-compare  Electron/native desktop parity comparison smoke
   summary       Do not run suites; summarize existing manifests in output-dir
 
 If no suites are passed, CLAWD_NATIVE_REVIEW_SUITES is used. If that variable is
@@ -145,6 +146,10 @@ for suite in "${SUITES[@]}"; do
           "$REVIEW_ROOT/session-hud/session-hud-click.png" \
           "$REVIEW_ROOT/session-hud/manifest.json"
       ;;
+    "desktop-compare"|"desktop-parity")
+      run_suite "desktop-compare" "$REVIEW_ROOT/desktop-compare" \
+        bash "$SCRIPT_DIR/smoke-electron-native-desktop-compare.sh" "$REVIEW_ROOT/desktop-compare"
+      ;;
     *)
       echo "error: unknown review suite: $suite" >&2
       record_suite "$suite" "failed" "64" "" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -262,6 +267,7 @@ manifest.summaryStatus = summary
       passed: summary.passed !== false,
       count: summary.count,
       motionFailures: Array.isArray(summary.motionFailures) ? summary.motionFailures.length : 0,
+      compareFailures: Array.isArray(summary.compareFailures) ? summary.compareFailures.length : 0,
     }
   : null;
 manifest.compareStatus = compare

@@ -107,8 +107,8 @@ node scripts/summarize-smoke-manifests.js \
   /tmp/clawd-native-motion-suite
 ```
 
-The review bundle accepts `motion`, `visual`, `state`, `transitions`, `hud`, or
-`summary` suite names. If no suite names are passed, it uses
+The review bundle accepts `motion`, `visual`, `state`, `transitions`, `hud`,
+`desktop-compare`, or `summary` suite names. If no suite names are passed, it uses
 `CLAWD_NATIVE_REVIEW_SUITES`, defaulting to all suites; transition smoke cycles
 default to 1 and can be changed with `CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES`.
 Set `CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO` to make the generated summary fail if
