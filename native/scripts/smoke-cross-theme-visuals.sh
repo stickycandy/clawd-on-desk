@@ -8,6 +8,7 @@ VERIFY_SCREENSHOTS="$SCRIPT_DIR/verify-smoke-screenshots.js"
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 SMOKE_ROOT="${1:-${TMPDIR:-/tmp}/clawd-native-cross-theme-smoke-$RUN_ID}"
+CAPTURE_REGION="${CLAWD_NATIVE_VISUAL_CAPTURE_REGION:-}"
 APP_PID=""
 CURRENT_LOG=""
 CURRENT_PORT=""
@@ -44,6 +45,10 @@ require_command curl
 require_command node
 require_command osascript
 require_command screencapture
+
+if [[ -n "$CAPTURE_REGION" && ! "$CAPTURE_REGION" =~ ^-?[0-9]+,-?[0-9]+,[0-9]+,[0-9]+$ ]]; then
+  fail "invalid capture region: $CAPTURE_REGION"
+fi
 
 json_bool() {
   if [[ "$1" == "true" ]]; then
@@ -129,7 +134,11 @@ capture_current() {
     -e 'tell application "System Events" to tell process "ClawdNative" to perform action "AXRaise" of window 1' \
     >/dev/null 2>&1 || true
   sleep 0.2
-  screencapture -x "$screenshot_path" || fail "screencapture failed for $theme $case_name"
+  if [[ -n "$CAPTURE_REGION" ]]; then
+    screencapture -x -R "$CAPTURE_REGION" "$screenshot_path" || fail "screencapture failed for $theme $case_name"
+  else
+    screencapture -x "$screenshot_path" || fail "screencapture failed for $theme $case_name"
+  fi
   echo "$screenshot_path"
 }
 
@@ -163,5 +172,22 @@ node "$VERIFY_SCREENSHOTS" \
   --manifest "$SMOKE_ROOT/manifest.json" \
   "$SMOKE_ROOT" \
   || fail "screenshot verification failed"
+
+node - "$SMOKE_ROOT/manifest.json" "$CAPTURE_REGION" <<'NODE'
+const fs = require("fs");
+
+const [manifestPath, captureRegion] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.runtime = "native";
+manifest.scope = "cross-theme-visual";
+if (captureRegion) {
+  manifest.captureRegion = captureRegion;
+}
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+
 echo "Smoke root: $SMOKE_ROOT"
+if [[ -n "$CAPTURE_REGION" ]]; then
+  echo "Capture region: $CAPTURE_REGION"
+fi
 echo "Manifest: $SMOKE_ROOT/manifest.json"
