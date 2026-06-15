@@ -126,7 +126,8 @@ post_state() {
 capture_current() {
   local theme="$1"
   local state="$2"
-  local case_name="desktop-$state"
+  local case_label="${3:-$state}"
+  local case_name="desktop-$case_label"
   local screenshot_path="$SMOKE_ROOT/$theme-$case_name/$theme-$case_name.png"
   mkdir -p "$(dirname "$screenshot_path")"
   sleep "$STABLE_DELAY"
@@ -143,7 +144,7 @@ capture_theme() {
   post_state "working" "electron-$theme-working" "$theme desktop working" "PreToolUse"
   capture_current "$theme" "working"
   post_state "notification" "electron-$theme-notification" "$theme desktop notification" "Notification"
-  capture_current "$theme" "notification"
+  capture_current "$theme" "notification" "alert"
 }
 
 mkdir -p "$SMOKE_ROOT"
