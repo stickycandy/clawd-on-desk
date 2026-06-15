@@ -149,6 +149,7 @@ sleep 1.2
 capture_window "$SMOKE_ROOT/cloudling-carrying-b.png"
 node "$VERIFY_SCREENSHOTS" \
   --min-images 2 \
+  --manifest "$SMOKE_ROOT/manifest.json" \
   --motion-pair "$SMOKE_ROOT/cloudling-carrying-a.png" "$SMOKE_ROOT/cloudling-carrying-b.png" \
   --min-motion-ratio 0.015 \
   "$SMOKE_ROOT" \

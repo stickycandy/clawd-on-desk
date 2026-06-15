@@ -149,6 +149,7 @@ sleep 1.2
 capture_window "$SMOKE_ROOT/calico-working-juggling-b.png"
 node "$VERIFY_SCREENSHOTS" \
   --min-images 2 \
+  --manifest "$SMOKE_ROOT/manifest.json" \
   --motion-pair "$SMOKE_ROOT/calico-working-juggling-a.png" "$SMOKE_ROOT/calico-working-juggling-b.png" \
   --min-motion-ratio 0.005 \
   "$SMOKE_ROOT" \

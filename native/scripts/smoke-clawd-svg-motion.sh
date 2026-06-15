@@ -149,6 +149,7 @@ sleep 1.2
 capture_window "$SMOKE_ROOT/clawd-working-typing-b.png"
 node "$VERIFY_SCREENSHOTS" \
   --min-images 2 \
+  --manifest "$SMOKE_ROOT/manifest.json" \
   --motion-pair "$SMOKE_ROOT/clawd-working-typing-a.png" "$SMOKE_ROOT/clawd-working-typing-b.png" \
   --min-motion-ratio 0.005 \
   "$SMOKE_ROOT" \

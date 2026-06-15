@@ -14,6 +14,7 @@ function fail(message) {
 
 function parseArgs(argv) {
   const args = {
+    manifest: null,
     minImages: 1,
     minMotionRatio: 0,
     motionPairs: [],
@@ -28,6 +29,12 @@ function parseArgs(argv) {
         fail(`invalid --min-images value: ${argv[i]}`);
       }
       args.minImages = value;
+    } else if (arg === "--manifest") {
+      const value = argv[++i];
+      if (!value) {
+        fail("--manifest expects an output path");
+      }
+      args.manifest = value;
     } else if (arg === "--min-motion-ratio") {
       const value = Number(argv[++i]);
       if (!Number.isFinite(value) || value < 0 || value > 1) {
@@ -352,9 +359,17 @@ function main() {
   const minLuminance = Math.min(...summaries.map((item) => item.luminanceRange));
   console.log(`Verified ${summaries.length} PNG screenshot(s). minUniqueColors=${minUnique} minLuminanceRange=${minLuminance}`);
 
+  const motionSummaries = [];
   for (const [first, second] of args.motionPairs) {
     try {
       const motion = motionMetrics(first, second);
+      motionSummaries.push({
+        first,
+        second,
+        ...motion,
+        minRatio: args.minMotionRatio,
+        passed: motion.ratio >= args.minMotionRatio,
+      });
       console.log(
         `Motion ${path.basename(first)} -> ${path.basename(second)} changed=${motion.changed}/${motion.total} `
         + `ratio=${motion.ratio.toFixed(4)} meanDelta=${motion.meanDelta.toFixed(2)}`
@@ -365,6 +380,19 @@ function main() {
     } catch (error) {
       fail(error.message);
     }
+  }
+
+  if (args.manifest) {
+    const output = {
+      generatedAt: new Date().toISOString(),
+      inputs: args.paths,
+      minImages: args.minImages,
+      screenshots: summaries,
+      motionPairs: motionSummaries,
+    };
+    fs.mkdirSync(path.dirname(args.manifest), { recursive: true });
+    fs.writeFileSync(args.manifest, `${JSON.stringify(output, null, 2)}\n`);
+    console.log(`Manifest: ${args.manifest}`);
   }
 }
 
