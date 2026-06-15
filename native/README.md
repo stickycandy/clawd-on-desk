@@ -145,7 +145,8 @@ bash scripts/smoke-electron-isolated-launch.sh
 ```
 
 To capture Electron desktop baseline screenshots for Clawd, Calico, and
-Cloudling idle / working / notification states:
+Cloudling idle / working / notification states, using the same desktop relative
+paths as the native cross-theme visual smoke:
 
 ```bash
 bash scripts/smoke-electron-desktop-baseline.sh /tmp/clawd-electron-baseline

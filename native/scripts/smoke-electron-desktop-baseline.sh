@@ -126,7 +126,8 @@ post_state() {
 capture_current() {
   local theme="$1"
   local state="$2"
-  local screenshot_path="$SMOKE_ROOT/$theme-desktop/$theme-desktop-$state.png"
+  local case_name="desktop-$state"
+  local screenshot_path="$SMOKE_ROOT/$theme-$case_name/$theme-$case_name.png"
   mkdir -p "$(dirname "$screenshot_path")"
   sleep "$STABLE_DELAY"
   screencapture -x -R "$CAPTURE_REGION" "$screenshot_path" || fail "screencapture failed for $theme $state"
@@ -167,6 +168,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 manifest.captureRegion = captureRegion;
 manifest.runtime = "electron";
 manifest.scope = "desktop-baseline";
+manifest.layout = "native-cross-theme-desktop-compatible";
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 
