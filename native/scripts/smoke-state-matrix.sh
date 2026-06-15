@@ -219,6 +219,11 @@ done
 
 cleanup_app
 EXPECTED_IMAGES=$((3 * (${#DESKTOP_STATES[@]} + ${#MINI_SOURCE_STATES[@]})))
-node "$VERIFY_SCREENSHOTS" --min-images "$EXPECTED_IMAGES" "$SMOKE_ROOT" || fail "screenshot verification failed"
+node "$VERIFY_SCREENSHOTS" \
+  --min-images "$EXPECTED_IMAGES" \
+  --manifest "$SMOKE_ROOT/manifest.json" \
+  "$SMOKE_ROOT" \
+  || fail "screenshot verification failed"
 echo "Smoke root: $SMOKE_ROOT"
 echo "Images: $EXPECTED_IMAGES"
+echo "Manifest: $SMOKE_ROOT/manifest.json"
