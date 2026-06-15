@@ -25,6 +25,7 @@ Environment:
   CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES  Transition cycles, default 1
   CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO   Optional minimum motion ratio threshold
   CLAWD_NATIVE_REVIEW_COMPARE_BASELINE   Optional Electron baseline PNG directory
+  CLAWD_NATIVE_REVIEW_COMPARE_TARGET     Optional native PNG directory, default review root
   CLAWD_NATIVE_REVIEW_COMPARE_MAX_CHANGED_RATIO  Optional compare threshold, 0..1
   CLAWD_NATIVE_REVIEW_COMPARE_MAX_MEAN_DELTA     Optional compare threshold
 USAGE
@@ -51,6 +52,7 @@ fi
 TRANSITION_CYCLES="${CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES:-1}"
 MIN_MOTION_RATIO="${CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO:-}"
 COMPARE_BASELINE="${CLAWD_NATIVE_REVIEW_COMPARE_BASELINE:-}"
+COMPARE_TARGET="${CLAWD_NATIVE_REVIEW_COMPARE_TARGET:-}"
 COMPARE_MAX_CHANGED_RATIO="${CLAWD_NATIVE_REVIEW_COMPARE_MAX_CHANGED_RATIO:-}"
 COMPARE_MAX_MEAN_DELTA="${CLAWD_NATIVE_REVIEW_COMPARE_MAX_MEAN_DELTA:-}"
 SUMMARY_PATH="$REVIEW_ROOT/summary.md"
@@ -75,6 +77,16 @@ require_command() {
 require_command node
 [[ -f "$SUMMARY_SCRIPT" ]] || fail "missing summary script: $SUMMARY_SCRIPT"
 [[ -z "$COMPARE_BASELINE" || -f "$COMPARE_SCRIPT" ]] || fail "missing compare script: $COMPARE_SCRIPT"
+
+resolve_compare_target() {
+  if [[ -z "$COMPARE_TARGET" ]]; then
+    printf "%s" "$REVIEW_ROOT"
+  elif [[ "$COMPARE_TARGET" = /* ]]; then
+    printf "%s" "$COMPARE_TARGET"
+  else
+    printf "%s/%s" "$REVIEW_ROOT" "$COMPARE_TARGET"
+  fi
+}
 
 record_suite() {
   local name="$1"
@@ -141,11 +153,13 @@ for suite in "${SUITES[@]}"; do
   esac
 done
 
-node - "$REVIEW_ROOT" "$STATUS_TSV" "$REVIEW_MANIFEST_PATH" "$SUMMARY_PATH" "$SUMMARY_JSON_PATH" "$COMPARE_MANIFEST_PATH" "$COMPARE_BASELINE" <<'NODE'
+COMPARE_TARGET_PATH="$(resolve_compare_target)"
+
+node - "$REVIEW_ROOT" "$STATUS_TSV" "$REVIEW_MANIFEST_PATH" "$SUMMARY_PATH" "$SUMMARY_JSON_PATH" "$COMPARE_MANIFEST_PATH" "$COMPARE_BASELINE" "$COMPARE_TARGET_PATH" <<'NODE'
 const fs = require("fs");
 const path = require("path");
 
-const [root, statusPath, manifestPath, summaryPath, summaryJsonPath, compareManifestPath, compareBaseline] = process.argv.slice(2);
+const [root, statusPath, manifestPath, summaryPath, summaryJsonPath, compareManifestPath, compareBaseline, compareTarget] = process.argv.slice(2);
 const rows = fs.readFileSync(statusPath, "utf8")
   .trim()
   .split(/\n/)
@@ -161,6 +175,7 @@ fs.writeFileSync(manifestPath, `${JSON.stringify({
   summary: path.resolve(summaryPath),
   summaryJson: path.resolve(summaryJsonPath),
   compareBaseline: compareBaseline ? path.resolve(compareBaseline) : null,
+  compareTarget: compareBaseline ? path.resolve(compareTarget) : null,
   compareManifest: compareBaseline ? path.resolve(compareManifestPath) : null,
   suites: rows,
 }, null, 2)}\n`);
@@ -176,6 +191,7 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
   echo "- Transition cycles: $TRANSITION_CYCLES"
   if [[ -n "$COMPARE_BASELINE" ]]; then
     echo "- Compare baseline: $COMPARE_BASELINE"
+    echo "- Compare target: $COMPARE_TARGET_PATH"
     echo "- Compare manifest: $COMPARE_MANIFEST_PATH"
   fi
   if [[ -n "$MIN_MOTION_RATIO" ]]; then
@@ -220,7 +236,7 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
     if [[ -n "$COMPARE_MAX_MEAN_DELTA" ]]; then
       compare_args+=(--max-mean-delta "$COMPARE_MAX_MEAN_DELTA")
     fi
-    if ! node "${compare_args[@]}" "$COMPARE_BASELINE" "$REVIEW_ROOT"; then
+    if ! node "${compare_args[@]}" "$COMPARE_BASELINE" "$COMPARE_TARGET_PATH"; then
       STATUS=1
     fi
   fi

@@ -119,11 +119,14 @@ Set `CLAWD_NATIVE_VISUAL_CAPTURE_REGION=x,y,w,h` to crop native visual smoke
 screenshots to a fixed desktop region selected for the current display layout.
 Set `CLAWD_NATIVE_REVIEW_COMPARE_BASELINE` to an Electron baseline PNG directory
 with matching relative paths to also emit `compare-manifest.json` from the
-per-pixel comparator; optional `CLAWD_NATIVE_REVIEW_COMPARE_MAX_CHANGED_RATIO`
-and `CLAWD_NATIVE_REVIEW_COMPARE_MAX_MEAN_DELTA` values make that comparison
-fail on drift beyond the chosen thresholds. The top-level `review-manifest.json`
-records final `passed`, `summaryStatus`, and `compareStatus` fields after all
-threshold checks finish.
+per-pixel comparator. Set `CLAWD_NATIVE_REVIEW_COMPARE_TARGET=visual` to compare
+against the review bundle's visual suite output instead of the whole review
+root; absolute paths are also accepted. Optional
+`CLAWD_NATIVE_REVIEW_COMPARE_MAX_CHANGED_RATIO` and
+`CLAWD_NATIVE_REVIEW_COMPARE_MAX_MEAN_DELTA` values make that comparison fail on
+drift beyond the chosen thresholds. The top-level `review-manifest.json` records
+final `passed`, `summaryStatus`, and `compareStatus` fields after all threshold
+checks finish.
 
 To compare two PNG screenshots or two matching screenshot directories for
 per-pixel parity:
