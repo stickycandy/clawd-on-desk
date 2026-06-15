@@ -68,6 +68,13 @@ SVG animation is not stuck on a static image-channel frame:
 bash scripts/smoke-clawd-svg-motion.sh
 ```
 
+For a targeted Calico APNG check that verifies image-channel APNG playback is
+not stuck on a static fallback frame:
+
+```bash
+bash scripts/smoke-calico-apng-motion.sh
+```
+
 All smoke scripts print the generated screenshot path or smoke root. The
 Session HUD smoke accepts an optional screenshot path, the cross-theme smoke
 scripts accept an optional output directory argument, and the transition smoke
@@ -150,8 +157,9 @@ Not yet at Electron parity:
   Cloudling WebKit motion smoke verifies trusted scripted SVGs are not only
   static fallback frames after the fallback grace period, and a targeted Clawd
   SVG motion smoke verifies playback-only SVGs animate through the inline
-  WebKit path. Session HUD click-reveal hot-zone/grace auto-hide has native
-  unit coverage.
+  WebKit path. A targeted Calico APNG motion smoke verifies image-channel APNG
+  playback is not static. Session HUD click-reveal hot-zone/grace auto-hide has
+  native unit coverage.
 - Repeated manual transition review and per-pixel parity for every Electron
   animation remain tuning tasks.
 
