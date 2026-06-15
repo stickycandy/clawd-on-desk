@@ -226,6 +226,41 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
   fi
 } >"$SUMMARY_PATH"
 
+node - "$REVIEW_MANIFEST_PATH" "$SUMMARY_JSON_PATH" "$COMPARE_MANIFEST_PATH" "$COMPARE_BASELINE" "$STATUS" <<'NODE'
+const fs = require("fs");
+
+const [manifestPath, summaryJsonPath, compareManifestPath, compareBaseline, status] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+
+function readJsonIfExists(file) {
+  if (!file || !fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+const summary = readJsonIfExists(summaryJsonPath);
+const compare = compareBaseline ? readJsonIfExists(compareManifestPath) : null;
+
+manifest.passed = Number(status) === 0;
+manifest.summaryStatus = summary
+  ? {
+      passed: summary.passed !== false,
+      count: summary.count,
+      motionFailures: Array.isArray(summary.motionFailures) ? summary.motionFailures.length : 0,
+    }
+  : null;
+manifest.compareStatus = compare
+  ? {
+      passed: compare.passed === true,
+      results: Array.isArray(compare.results) ? compare.results.length : 0,
+      maxChangedRatio: compare.maxChangedRatio,
+      maxMeanDelta: compare.maxMeanDelta,
+      failures: Array.isArray(compare.failures) ? compare.failures.length : 0,
+    }
+  : null;
+
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+
 echo "Review root: $REVIEW_ROOT"
 echo "Review manifest: $REVIEW_MANIFEST_PATH"
 echo "Summary: $SUMMARY_PATH"
