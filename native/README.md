@@ -132,8 +132,10 @@ node scripts/compare-smoke-screenshots.js \
 
 Electron baseline smoke runs can isolate app state from the user's normal
 Clawd profile by launching Electron with `CLAWD_ELECTRON_PREFS_PATH` and
-`CLAWD_ELECTRON_RUNTIME_PATH` set to temporary JSON paths, matching the native
-smoke scripts' isolated prefs/runtime model.
+`CLAWD_ELECTRON_RUNTIME_PATH` set to temporary JSON paths. Add
+`CLAWD_ELECTRON_SKIP_INTEGRATION_SYNC=1` so startup does not auto-edit user
+hook/plugin configs, matching the native smoke scripts' isolated
+prefs/runtime/no-sync model.
 
 Comparison manifests include aggregate max changed ratio / mean delta and a
 `failures` list for rows that exceed the configured thresholds.
