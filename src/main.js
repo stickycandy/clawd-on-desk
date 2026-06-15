@@ -141,7 +141,11 @@ const SIZES = {
 // `_settingsController.applyUpdate()`, which auto-persists.
 const prefsModule = require("./prefs");
 const { createSettingsController } = require("./settings-controller");
-const { resolveElectronPrefsPath } = require("./electron-smoke-paths");
+const {
+  ELECTRON_ALLOW_PARALLEL_ENV,
+  isTruthyEnvFlag,
+  resolveElectronPrefsPath,
+} = require("./electron-smoke-paths");
 const { createTranslator, i18n } = require("./i18n");
 const {
   getBubblePolicy,
@@ -3228,7 +3232,8 @@ app.on("open-url", (event, url) => {
   codexPetMain.enqueueImportUrl(url);
 });
 
-const gotTheLock = app.requestSingleInstanceLock();
+const allowParallelInstance = isTruthyEnvFlag(process.env[ELECTRON_ALLOW_PARALLEL_ENV]);
+const gotTheLock = allowParallelInstance || app.requestSingleInstanceLock();
 if (!gotTheLock) {
   if (process.argv.includes(REGISTER_PROTOCOL_DEV_ARG)) {
     const protocolRegistered = codexPetMain.registerProtocolClient();
