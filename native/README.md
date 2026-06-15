@@ -101,7 +101,9 @@ To compare two PNG screenshots or two matching screenshot directories for
 per-pixel parity:
 
 ```bash
-node scripts/compare-smoke-screenshots.js /tmp/electron-baseline /tmp/native-smoke
+node scripts/compare-smoke-screenshots.js \
+  --manifest /tmp/native-parity-compare.json \
+  /tmp/electron-baseline /tmp/native-smoke
 ```
 
 The native app listens on `127.0.0.1:23333-23337` and writes

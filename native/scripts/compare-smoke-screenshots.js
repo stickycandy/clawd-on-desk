@@ -14,6 +14,7 @@ function fail(message) {
 
 function parseArgs(argv) {
   const args = {
+    manifest: null,
     maxChangedRatio: 1,
     maxMeanDelta: Infinity,
     paths: [],
@@ -27,6 +28,12 @@ function parseArgs(argv) {
         fail(`invalid --max-changed-ratio value: ${argv[i]}`);
       }
       args.maxChangedRatio = value;
+    } else if (arg === "--manifest") {
+      const value = argv[++i];
+      if (!value) {
+        fail("--manifest expects an output path");
+      }
+      args.manifest = value;
     } else if (arg === "--max-mean-delta") {
       const value = Number(argv[++i]);
       if (!Number.isFinite(value) || value < 0) {
@@ -247,6 +254,21 @@ function main() {
   const maxRatio = Math.max(...rows.map((row) => row.changedRatio));
   const maxMean = Math.max(...rows.map((row) => row.meanDelta));
   console.log(`\nCompared ${rows.length} PNG pair(s). maxChangedRatio=${maxRatio.toFixed(6)} maxMeanDelta=${maxMean.toFixed(3)}`);
+  if (args.manifest) {
+    fs.mkdirSync(path.dirname(args.manifest), { recursive: true });
+    fs.writeFileSync(args.manifest, `${JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      left: args.paths[0],
+      right: args.paths[1],
+      thresholds: {
+        maxChangedRatio: args.maxChangedRatio,
+        maxMeanDelta: Number.isFinite(args.maxMeanDelta) ? args.maxMeanDelta : null,
+      },
+      passed: failures.length === 0,
+      results: rows,
+    }, null, 2)}\n`);
+    console.log(`Manifest: ${args.manifest}`);
+  }
   if (failures.length > 0) {
     fail(`${failures.length} PNG pair(s) exceeded thresholds`);
   }
