@@ -159,6 +159,13 @@ working / alert paths to match the native cross-theme visual smoke:
 bash scripts/smoke-electron-desktop-baseline.sh /tmp/clawd-electron-baseline
 ```
 
+To run the Electron baseline, native desktop-only visual smoke, and per-pixel
+directory comparison as one desktop parity bundle:
+
+```bash
+bash scripts/smoke-electron-native-desktop-compare.sh /tmp/clawd-desktop-compare
+```
+
 Comparison manifests include aggregate max changed ratio / mean delta and a
 `failures` list for rows that exceed the configured thresholds.
 
