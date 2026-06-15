@@ -144,6 +144,13 @@ To verify the isolated Electron launch contract before capturing baselines:
 bash scripts/smoke-electron-isolated-launch.sh
 ```
 
+To capture Electron desktop baseline screenshots for Clawd, Calico, and
+Cloudling idle / working / notification states:
+
+```bash
+bash scripts/smoke-electron-desktop-baseline.sh /tmp/clawd-electron-baseline
+```
+
 Comparison manifests include aggregate max changed ratio / mean delta and a
 `failures` list for rows that exceed the configured thresholds.
 
