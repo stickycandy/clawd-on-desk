@@ -158,5 +158,10 @@ for theme in clawd calico cloudling; do
 done
 
 cleanup_app
-node "$VERIFY_SCREENSHOTS" --min-images 15 "$SMOKE_ROOT" || fail "screenshot verification failed"
+node "$VERIFY_SCREENSHOTS" \
+  --min-images 15 \
+  --manifest "$SMOKE_ROOT/manifest.json" \
+  "$SMOKE_ROOT" \
+  || fail "screenshot verification failed"
 echo "Smoke root: $SMOKE_ROOT"
+echo "Manifest: $SMOKE_ROOT/manifest.json"
