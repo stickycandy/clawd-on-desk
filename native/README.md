@@ -81,6 +81,13 @@ To run the targeted motion checks for all three renderer channels together:
 bash scripts/smoke-motion-suite.sh
 ```
 
+To run a review bundle that groups selected smoke suites and writes a single
+`summary.md` plus `review-manifest.json`:
+
+```bash
+bash scripts/smoke-review-bundle.sh /tmp/clawd-native-review motion visual state
+```
+
 All smoke scripts print the generated screenshot path or smoke root. The
 Session HUD smoke accepts an optional screenshot path and optional manifest path,
 the cross-theme smoke scripts accept an optional output directory argument, and
@@ -96,6 +103,11 @@ To summarize one or more smoke output directories into a review table:
 ```bash
 node scripts/summarize-smoke-manifests.js /tmp/clawd-native-motion-suite
 ```
+
+The review bundle accepts `motion`, `visual`, `state`, `transitions`, `hud`, or
+`summary` suite names. If no suite names are passed, it uses
+`CLAWD_NATIVE_REVIEW_SUITES`, defaulting to all suites; transition smoke cycles
+default to 1 and can be changed with `CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES`.
 
 To compare two PNG screenshots or two matching screenshot directories for
 per-pixel parity:
