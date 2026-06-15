@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUMMARY_SCRIPT="$SCRIPT_DIR/summarize-smoke-manifests.js"
+COMPARE_SCRIPT="$SCRIPT_DIR/compare-smoke-screenshots.js"
 
 usage() {
   cat <<'USAGE'
@@ -23,6 +24,9 @@ unset, the default is: motion visual state transitions hud.
 Environment:
   CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES  Transition cycles, default 1
   CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO   Optional minimum motion ratio threshold
+  CLAWD_NATIVE_REVIEW_COMPARE_BASELINE   Optional Electron baseline PNG directory
+  CLAWD_NATIVE_REVIEW_COMPARE_MAX_CHANGED_RATIO  Optional compare threshold, 0..1
+  CLAWD_NATIVE_REVIEW_COMPARE_MAX_MEAN_DELTA     Optional compare threshold
 USAGE
 }
 
@@ -46,8 +50,12 @@ fi
 
 TRANSITION_CYCLES="${CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES:-1}"
 MIN_MOTION_RATIO="${CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO:-}"
+COMPARE_BASELINE="${CLAWD_NATIVE_REVIEW_COMPARE_BASELINE:-}"
+COMPARE_MAX_CHANGED_RATIO="${CLAWD_NATIVE_REVIEW_COMPARE_MAX_CHANGED_RATIO:-}"
+COMPARE_MAX_MEAN_DELTA="${CLAWD_NATIVE_REVIEW_COMPARE_MAX_MEAN_DELTA:-}"
 SUMMARY_PATH="$REVIEW_ROOT/summary.md"
 SUMMARY_JSON_PATH="$REVIEW_ROOT/summary.json"
+COMPARE_MANIFEST_PATH="$REVIEW_ROOT/compare-manifest.json"
 REVIEW_MANIFEST_PATH="$REVIEW_ROOT/review-manifest.json"
 STATUS_TSV="$REVIEW_ROOT/suite-status.tsv"
 STATUS=0
@@ -66,6 +74,7 @@ require_command() {
 
 require_command node
 [[ -f "$SUMMARY_SCRIPT" ]] || fail "missing summary script: $SUMMARY_SCRIPT"
+[[ -z "$COMPARE_BASELINE" || -f "$COMPARE_SCRIPT" ]] || fail "missing compare script: $COMPARE_SCRIPT"
 
 record_suite() {
   local name="$1"
@@ -132,11 +141,11 @@ for suite in "${SUITES[@]}"; do
   esac
 done
 
-node - "$REVIEW_ROOT" "$STATUS_TSV" "$REVIEW_MANIFEST_PATH" "$SUMMARY_PATH" "$SUMMARY_JSON_PATH" <<'NODE'
+node - "$REVIEW_ROOT" "$STATUS_TSV" "$REVIEW_MANIFEST_PATH" "$SUMMARY_PATH" "$SUMMARY_JSON_PATH" "$COMPARE_MANIFEST_PATH" "$COMPARE_BASELINE" <<'NODE'
 const fs = require("fs");
 const path = require("path");
 
-const [root, statusPath, manifestPath, summaryPath, summaryJsonPath] = process.argv.slice(2);
+const [root, statusPath, manifestPath, summaryPath, summaryJsonPath, compareManifestPath, compareBaseline] = process.argv.slice(2);
 const rows = fs.readFileSync(statusPath, "utf8")
   .trim()
   .split(/\n/)
@@ -151,6 +160,8 @@ fs.writeFileSync(manifestPath, `${JSON.stringify({
   root: path.resolve(root),
   summary: path.resolve(summaryPath),
   summaryJson: path.resolve(summaryJsonPath),
+  compareBaseline: compareBaseline ? path.resolve(compareBaseline) : null,
+  compareManifest: compareBaseline ? path.resolve(compareManifestPath) : null,
   suites: rows,
 }, null, 2)}\n`);
 NODE
@@ -163,6 +174,10 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
   echo "- Review manifest: $REVIEW_MANIFEST_PATH"
   echo "- Summary JSON: $SUMMARY_JSON_PATH"
   echo "- Transition cycles: $TRANSITION_CYCLES"
+  if [[ -n "$COMPARE_BASELINE" ]]; then
+    echo "- Compare baseline: $COMPARE_BASELINE"
+    echo "- Compare manifest: $COMPARE_MANIFEST_PATH"
+  fi
   if [[ -n "$MIN_MOTION_RATIO" ]]; then
     echo "- Min motion ratio: $MIN_MOTION_RATIO"
   fi
@@ -193,10 +208,29 @@ MANIFEST_COUNT="$(find "$REVIEW_ROOT" -name manifest.json -type f | wc -l | tr -
     printf "{\n  \"generatedAt\": \"%s\",\n  \"count\": 0,\n  \"manifests\": []\n}\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$SUMMARY_JSON_PATH"
     echo "No suite manifest.json files found."
   fi
+
+  if [[ -n "$COMPARE_BASELINE" ]]; then
+    echo
+    echo "## Baseline Comparison"
+    echo
+    compare_args=("$COMPARE_SCRIPT" --manifest "$COMPARE_MANIFEST_PATH")
+    if [[ -n "$COMPARE_MAX_CHANGED_RATIO" ]]; then
+      compare_args+=(--max-changed-ratio "$COMPARE_MAX_CHANGED_RATIO")
+    fi
+    if [[ -n "$COMPARE_MAX_MEAN_DELTA" ]]; then
+      compare_args+=(--max-mean-delta "$COMPARE_MAX_MEAN_DELTA")
+    fi
+    if ! node "${compare_args[@]}" "$COMPARE_BASELINE" "$REVIEW_ROOT"; then
+      STATUS=1
+    fi
+  fi
 } >"$SUMMARY_PATH"
 
 echo "Review root: $REVIEW_ROOT"
 echo "Review manifest: $REVIEW_MANIFEST_PATH"
 echo "Summary: $SUMMARY_PATH"
 echo "Summary JSON: $SUMMARY_JSON_PATH"
+if [[ -n "$COMPARE_BASELINE" ]]; then
+  echo "Compare manifest: $COMPARE_MANIFEST_PATH"
+fi
 exit "$STATUS"

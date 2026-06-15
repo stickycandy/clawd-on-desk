@@ -113,6 +113,11 @@ The review bundle accepts `motion`, `visual`, `state`, `transitions`, `hud`, or
 default to 1 and can be changed with `CLAWD_NATIVE_REVIEW_TRANSITION_CYCLES`.
 Set `CLAWD_NATIVE_REVIEW_MIN_MOTION_RATIO` to make the generated summary fail if
 any motion manifest reports a lower frame-to-frame change ratio.
+Set `CLAWD_NATIVE_REVIEW_COMPARE_BASELINE` to an Electron baseline PNG directory
+with matching relative paths to also emit `compare-manifest.json` from the
+per-pixel comparator; optional `CLAWD_NATIVE_REVIEW_COMPARE_MAX_CHANGED_RATIO`
+and `CLAWD_NATIVE_REVIEW_COMPARE_MAX_MEAN_DELTA` values make that comparison
+fail on drift beyond the chosen thresholds.
 
 To compare two PNG screenshots or two matching screenshot directories for
 per-pixel parity:
