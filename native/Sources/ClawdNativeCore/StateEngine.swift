@@ -128,6 +128,7 @@ public final class StateEngine: @unchecked Sendable {
 
   public func setState(_ state: ClawdState, force: Bool = false) {
     publish {
+      guard !doNotDisturb else { return }
       setStateLocked(state, force: force)
     }
   }

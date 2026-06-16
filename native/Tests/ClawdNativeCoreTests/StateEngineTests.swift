@@ -25,6 +25,9 @@ final class StateEngineTests: XCTestCase {
 
     engine.updateSession("s1", state: .notification, event: "PermissionRequest")
     XCTAssertEqual(engine.current(), .sleeping)
+
+    engine.setState(.working, force: true)
+    XCTAssertEqual(engine.current(), .sleeping)
   }
 
   func testStaleCleanupDropsOldWorkingSession() {
