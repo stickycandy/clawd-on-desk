@@ -31,6 +31,8 @@ public struct NativeHookRuntime {
       return copilotRoute(payload: object)
     case "gemini-cli":
       return geminiRoute(payload: object)
+    case "antigravity-cli":
+      return antigravityRoute(payload: object)
     case "cursor-agent":
       return cursorRoute(payload: object)
     case "codebuddy":
@@ -81,6 +83,18 @@ public struct NativeHookRuntime {
     }
     if agentId == "codebuddy" {
       return event == "PreToolUse" ? #"{"decision":"allow"}"# : "{}"
+    }
+    if agentId == "antigravity-cli" {
+      var hookEvent = event
+      if let stdin,
+         case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: stdin),
+         let payloadEvent = object.string("hookEventName") ?? object.string("hook_event_name"),
+         !payloadEvent.isEmpty {
+        hookEvent = payloadEvent
+      }
+      if hookEvent == "PreToolUse" { return #"{"decision":"ask"}"# }
+      if hookEvent == "Stop" { return #"{"decision":"allow"}"# }
+      return "{}"
     }
     guard agentId == "gemini-cli" else { return nil }
     var hookEvent = event
@@ -293,6 +307,30 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func antigravityRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("hookEventName") ?? payload.string("hook_event_name") ?? event
+    guard var mapped = Self.antigravityState[hookEvent] else { return .none }
+    if hookEvent == "PostToolUse", antigravityHasError(payload) {
+      mapped = (state: "error", event: "PostToolUseFailure")
+    } else if hookEvent == "Stop", antigravityHasStopError(payload) {
+      mapped = (state: "error", event: "StopFailure")
+    } else if hookEvent == "Stop", payload.bool("fullyIdle") == false {
+      mapped = (state: "working", event: "PostToolUse")
+    }
+
+    var sharedPayload = payload
+    if sharedPayload.string("cwd") == nil, let cwd = antigravityCwd(payload) {
+      sharedPayload["cwd"] = .string(cwd)
+    }
+    return .state(.object(baseState(
+      state: mapped.state,
+      sessionId: antigravitySessionId(payload: payload),
+      event: mapped.event,
+      agentId: "antigravity-cli",
+      payload: sharedPayload
+    )))
+  }
+
   private func cursorRoute(payload: [String: JSONValue]) -> Route {
     let hookEvent = payload.string("hook_event_name") ?? event
     guard var mapped = Self.cursorState[hookEvent] else { return .none }
@@ -495,6 +533,8 @@ public struct NativeHookRuntime {
       return ["copilot"]
     case "gemini-cli":
       return ["gemini"]
+    case "antigravity-cli":
+      return ["agy"]
     case "cursor-agent":
       return ["cursor", "Cursor"]
     case "codebuddy":
@@ -524,6 +564,44 @@ public struct NativeHookRuntime {
     default:
       return true
     }
+  }
+
+  private func antigravityHasError(_ payload: [String: JSONValue]) -> Bool {
+    guard let error = payload["error"] else { return false }
+    switch error {
+    case .null:
+      return false
+    case .bool(let value):
+      return value
+    case .string(let value):
+      return !value.isEmpty
+    default:
+      return true
+    }
+  }
+
+  private func antigravityHasStopError(_ payload: [String: JSONValue]) -> Bool {
+    if antigravityHasError(payload) { return true }
+    let reason = payload.string("terminationReason")?.lowercased() ?? ""
+    return reason.contains("error") || reason.contains("failed") || reason.contains("failure")
+  }
+
+  private func antigravityCwd(_ payload: [String: JSONValue]) -> String? {
+    if let cwd = payload.object("toolCall")?.object("args")?.string("Cwd"), !cwd.isEmpty {
+      return cwd
+    }
+    return firstString(in: payload["workspacePaths"])
+  }
+
+  private func antigravitySessionId(payload: [String: JSONValue]) -> String {
+    let fallback: String?
+    if let transcriptPath = payload.string("transcriptPath"), !transcriptPath.isEmpty {
+      let parent = URL(fileURLWithPath: transcriptPath).deletingLastPathComponent().lastPathComponent
+      fallback = parent.isEmpty ? nil : parent
+    } else {
+      fallback = nil
+    }
+    return normalizeSessionId(firstNonEmpty(payload.string("conversationId"), payload.string("session_id"), fallback), prefix: "antigravity")
   }
 
   private func addToolMetadata(payload: [String: JSONValue], body: inout [String: JSONValue]) {
@@ -1145,6 +1223,13 @@ public struct NativeHookRuntime {
     "AfterAgent": ("idle", "AfterAgent", false),
     "Notification": ("notification", "Notification", false),
     "PreCompress": ("idle", "PreCompress", true)
+  ]
+
+  private static let antigravityState: [String: (state: String, event: String)] = [
+    "PreInvocation": ("thinking", "UserPromptSubmit"),
+    "PostToolUse": ("working", "PostToolUse"),
+    "PostInvocation": ("idle", "AfterAgent"),
+    "Stop": ("attention", "Stop")
   ]
 
   private static let cursorState: [String: (state: String, event: String)] = [

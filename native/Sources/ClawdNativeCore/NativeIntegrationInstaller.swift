@@ -56,6 +56,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "copilot-cli",
     "cursor-agent",
     "gemini-cli",
+    "antigravity-cli",
     "kiro-cli",
     "codewhale",
     "qwen-code",
@@ -102,6 +103,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installCursor()
       case "gemini-cli":
         return try installGemini()
+      case "antigravity-cli":
+        return try installAntigravity()
       case "kiro-cli":
         return try installKiro()
       case "codewhale":
@@ -141,6 +144,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallCursor()
       case "gemini-cli":
         return try uninstallGemini()
+      case "antigravity-cli":
+        return try uninstallAntigravity()
       case "kiro-cli":
         return try uninstallKiro()
       case "codewhale":
@@ -508,6 +513,71 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       status: "ok",
       message: "Swift Gemini hooks removed from \(settingsPath.path)",
       removed: counters.removed
+    )
+  }
+
+  private func installAntigravity() throws -> NativeIntegrationSummary {
+    let configDir = homeDirectory.appendingPathComponent(".gemini/config", isDirectory: true)
+    guard fileManager.fileExists(atPath: configDir.path) else {
+      return .init(agentId: "antigravity-cli", action: "install", status: "skip", message: "\(configDir.path) not found")
+    }
+    let hooksPath = configDir.appendingPathComponent("hooks.json")
+    var settings = try readJSONObject(hooksPath)
+    let existingGroup = settings["clawd"] as? [String: Any]
+    let nodeBin = resolveNodeBin(existingSettings: settings, marker: "antigravity-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/antigravity-hook.js").path
+    var desiredGroup = antigravityHookGroup(nodeBin: nodeBin, hookScript: hookScript)
+    if existingGroup?["enabled"] as? Bool == false {
+      desiredGroup["enabled"] = false
+    }
+
+    var counters = ChangeCounters()
+    for event in Self.antigravityEvents {
+      guard let desired = desiredGroup[event] else { continue }
+      if existingGroup == nil || existingGroup?[event] == nil {
+        counters.added += 1
+      } else if !jsonValueEquals(existingGroup?[event], desired) {
+        counters.updated += 1
+      } else {
+        counters.skipped += 1
+      }
+    }
+
+    if existingGroup == nil || !jsonValueEquals(existingGroup, desiredGroup) {
+      settings["clawd"] = desiredGroup
+      try writeJSONObject(settings, to: hooksPath)
+    }
+
+    return NativeIntegrationSummary(
+      agentId: "antigravity-cli",
+      action: "install",
+      status: "ok",
+      message: "Swift Antigravity hooks -> \(hooksPath.path)",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped
+    )
+  }
+
+  private func uninstallAntigravity() throws -> NativeIntegrationSummary {
+    let hooksPath = homeDirectory.appendingPathComponent(".gemini/config/hooks.json")
+    var settings = try readJSONObject(hooksPath, missingIsEmpty: false)
+    guard let group = settings["clawd"], containsMarker(group, marker: "antigravity-hook.js") else {
+      return NativeIntegrationSummary(
+        agentId: "antigravity-cli",
+        action: "uninstall",
+        status: "ok",
+        message: "Swift Antigravity hooks not found in \(hooksPath.path)"
+      )
+    }
+    settings.removeValue(forKey: "clawd")
+    try writeJSONObject(settings, to: hooksPath, backup: true)
+    return NativeIntegrationSummary(
+      agentId: "antigravity-cli",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Antigravity hooks removed from \(hooksPath.path)",
+      removed: 1
     )
   }
 
@@ -906,6 +976,64 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return "\(quote(nodeBin)) \(quote(scriptPath)) \(quote(event))"
   }
 
+  private func antigravityHookGroup(nodeBin: String, hookScript: String) -> [String: Any] {
+    var group: [String: Any] = [:]
+    for event in Self.antigravityEvents {
+      let rawCommand = hookCommand(
+        agentId: "antigravity-cli",
+        event: event,
+        nodeBin: nodeBin,
+        scriptPath: hookScript,
+        marker: "antigravity-hook.js"
+      )
+      let hook = commandHook(command: antigravityFailOpenCommand(rawCommand, event: event, nodeBin: nodeBin), timeout: 10)
+      if event == "PostToolUse" {
+        group[event] = [[
+          "matcher": "*",
+          "hooks": [hook]
+        ]]
+      } else {
+        group[event] = [hook]
+      }
+    }
+    return group
+  }
+
+  private func antigravityFailOpenCommand(_ command: String, event: String, nodeBin: String) -> String {
+    let fallback = shellSingleQuote(Self.antigravityFallbackStdout(event))
+    let validatorScript = [
+      "let s='';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data',c=>s+=c);",
+      "process.stdin.on('end',()=>{",
+      "try{const v=JSON.parse(s);if(!v||typeof v!=='object'||Array.isArray(v))process.exit(1);}",
+      "catch{process.exit(1);}",
+      "});"
+    ].joined()
+    let validator = [nodeBin, "-e", validatorScript].map(shellSingleQuote).joined(separator: " ")
+    return [
+      "tmp_dir=${TMPDIR:-/tmp}",
+      "in_file=$(mktemp \"$tmp_dir/clawd-agy-in.XXXXXX\" 2>/dev/null || printf '%s/clawd-agy-in-%s' \"$tmp_dir\" \"$$\")",
+      "out_file=$(mktemp \"$tmp_dir/clawd-agy-out.XXXXXX\" 2>/dev/null || printf '%s/clawd-agy-out-%s' \"$tmp_dir\" \"$$\")",
+      "pid=",
+      "watchdog=",
+      "cleanup(){ trap - EXIT HUP INT TERM; [ -n \"$watchdog\" ] && kill \"$watchdog\" 2>/dev/null; [ -n \"$pid\" ] && kill \"$pid\" 2>/dev/null; rm -f \"$in_file\" \"$out_file\"; }",
+      "trap cleanup EXIT HUP INT",
+      "cat > \"$in_file\" 2>/dev/null || :",
+      "\(command) < \"$in_file\" > \"$out_file\" 2>/dev/null & pid=$!",
+      "( sleep 8; kill \"$pid\" 2>/dev/null ) & watchdog=$!",
+      "wait \"$pid\" 2>/dev/null",
+      "status=$?",
+      "[ -n \"$watchdog\" ] && kill \"$watchdog\" 2>/dev/null",
+      "[ -n \"$watchdog\" ] && wait \"$watchdog\" 2>/dev/null",
+      "pid=",
+      "watchdog=",
+      "out=$(cat \"$out_file\" 2>/dev/null)",
+      "if [ \"$status\" -eq 0 ] && [ -n \"$out\" ] && printf '%s' \"$out\" | \(validator) 2>/dev/null; then printf '%s\\n' \"$out\"; else printf '%s\\n' \(fallback); fi",
+      "exit 0"
+    ].joined(separator: "; ")
+  }
+
   private func resolveNativeHookBinary() -> String? {
     var candidates: [String] = []
     if let explicit = environment["CLAWD_NATIVE_HOOK_BIN"]?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
@@ -1259,6 +1387,25 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       return array.contains { containsMarker($0, marker: marker) }
     }
     return false
+  }
+
+  private func jsonValueEquals(_ lhs: Any?, _ rhs: Any) -> Bool {
+    switch (lhs, rhs) {
+    case let (left as [String: Any], right as [String: Any]):
+      return NSDictionary(dictionary: left).isEqual(to: right)
+    case let (left as [Any], right as [Any]):
+      return NSArray(array: left).isEqual(to: right)
+    case let (left as String, right as String):
+      return left == right
+    case let (left as Bool, right as Bool):
+      return left == right
+    case let (left as Int, right as Int):
+      return left == right
+    case let (left as Double, right as Double):
+      return left == right
+    default:
+      return false
+    }
   }
 
   private func ensureCodexHooksFeature(_ configPath: URL) throws -> (changed: Bool, warning: String?) {
@@ -1681,6 +1828,10 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "\"\(value.replacingOccurrences(of: "\"", with: "\\\""))\""
   }
 
+  private func shellSingleQuote(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+  }
+
   private struct ChangeCounters: Sendable {
     var added = 0
     var updated = 0
@@ -1765,6 +1916,19 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "Notification",
     "PreCompress"
   ]
+
+  private static let antigravityEvents = [
+    "PreInvocation",
+    "PostToolUse",
+    "PostInvocation",
+    "Stop"
+  ]
+
+  private static func antigravityFallbackStdout(_ event: String) -> String {
+    if event == "PreToolUse" { return #"{"decision":"ask"}"# }
+    if event == "Stop" { return #"{"decision":"allow"}"# }
+    return "{}"
+  }
 
   private static let cursorEvents = [
     "sessionStart",

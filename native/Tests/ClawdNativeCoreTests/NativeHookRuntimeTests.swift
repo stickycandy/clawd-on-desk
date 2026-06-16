@@ -109,6 +109,39 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(NativeHookRuntime.stdout(agentId: "gemini-cli", event: "AfterTool"), #"{"decision":"allow"}"#)
   }
 
+  func testAntigravityRouteUsesConversationWorkspaceAndStdout() throws {
+    let payload = Data(#"{"hookEventName":"PostToolUse","conversationId":"c1","workspacePaths":["/repo"],"toolCall":{"args":{"Cwd":"/tool-cwd"}}}"#.utf8)
+    let route = NativeHookRuntime(agentId: "antigravity-cli", event: "unknown", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "antigravity-cli")
+    XCTAssertEqual(body.string("session_id"), "antigravity:c1")
+    XCTAssertEqual(body.string("state"), "working")
+    XCTAssertEqual(body.string("event"), "PostToolUse")
+    XCTAssertEqual(body.string("cwd"), "/tool-cwd")
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "antigravity-cli", event: "Stop"), #"{"decision":"allow"}"#)
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "antigravity-cli", event: "PreInvocation"), "{}")
+  }
+
+  func testAntigravityRouteMapsFailuresAndBusyStop() throws {
+    let failedTool = Data(#"{"hookEventName":"PostToolUse","conversationId":"c1","error":"boom"}"#.utf8)
+    let failedToolRoute = NativeHookRuntime(agentId: "antigravity-cli", event: "PostToolUse", environment: [:]).route(stdin: failedTool)
+    guard case .state(.object(let failedToolBody)) = failedToolRoute else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(failedToolBody.string("state"), "error")
+    XCTAssertEqual(failedToolBody.string("event"), "PostToolUseFailure")
+
+    let busyStop = Data(#"{"hookEventName":"Stop","conversationId":"c1","fullyIdle":false}"#.utf8)
+    let busyStopRoute = NativeHookRuntime(agentId: "antigravity-cli", event: "Stop", environment: [:]).route(stdin: busyStop)
+    guard case .state(.object(let busyStopBody)) = busyStopRoute else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(busyStopBody.string("state"), "working")
+    XCTAssertEqual(busyStopBody.string("event"), "PostToolUse")
+  }
+
   func testCursorRouteUsesHookEventPayloadWorkspaceAndDisplayHint() throws {
     let payload = Data(#"{"hook_event_name":"preToolUse","conversation_id":"c1","workspace_roots":["/repo"],"tool_name":"Shell"}"#.utf8)
     let route = NativeHookRuntime(agentId: "cursor-agent", event: "unknown", environment: [:]).route(stdin: payload)

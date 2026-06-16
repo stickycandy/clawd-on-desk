@@ -195,6 +195,53 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertTrue(String(describing: preCompress).contains("PreCompress"))
   }
 
+  func testAntigravityInstallerWritesClawdGroupAndUninstallsManagedGroup() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "user": [
+        "enabled": true
+      ],
+      "clawd": [
+        "enabled": false,
+        "PreInvocation": [[
+          "type": "command",
+          "command": "node /old/antigravity-hook.js PreInvocation"
+        ]]
+      ]
+    ], to: ".gemini/config/hooks.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "antigravity-cli", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+    XCTAssertEqual(summary.added, 3)
+    XCTAssertEqual(summary.updated, 1)
+
+    let settings = try fixture.readJSON(".gemini/config/hooks.json")
+    XCTAssertNotNil(settings["user"])
+    let group = try XCTUnwrap(settings["clawd"] as? [String: Any])
+    XCTAssertEqual(group["enabled"] as? Bool, false)
+    XCTAssertNil(group["PreToolUse"])
+    let preInvocation = try XCTUnwrap(group["PreInvocation"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: preInvocation).contains("antigravity-hook.js"))
+    XCTAssertTrue(String(describing: preInvocation).contains("/opt/homebrew/bin/node"))
+    XCTAssertTrue(String(describing: preInvocation).contains("clawd-agy-in"))
+    XCTAssertTrue(String(describing: preInvocation).contains("PreInvocation"))
+    XCTAssertFalse(String(describing: preInvocation).contains("/old/antigravity-hook.js"))
+    let postToolUse = try XCTUnwrap(group["PostToolUse"] as? [[String: Any]])
+    XCTAssertEqual(postToolUse.first?["matcher"] as? String, "*")
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "antigravity-cli"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 1)
+    let uninstalled = try fixture.readJSON(".gemini/config/hooks.json")
+    XCTAssertNotNil(uninstalled["user"])
+    XCTAssertNil(uninstalled["clawd"])
+  }
+
   func testCursorInstallerPreservesUserHooksAndUninstallsManagedEntries() throws {
     let fixture = try Fixture()
     try fixture.writeJSON([
