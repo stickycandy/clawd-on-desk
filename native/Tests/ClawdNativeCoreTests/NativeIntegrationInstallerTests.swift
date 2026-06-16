@@ -292,6 +292,38 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertFalse(uninstalled.contains("kimi-hook.js"))
   }
 
+  func testPiInstallerCopiesManagedExtensionAndUninstallsIt() throws {
+    let fixture = try Fixture()
+    let hooksDir = fixture.projectRoot.appendingPathComponent("hooks", isDirectory: true)
+    try "export default {};".write(to: hooksDir.appendingPathComponent("pi-extension.ts"), atomically: true, encoding: .utf8)
+    try "module.exports = {};".write(to: hooksDir.appendingPathComponent("pi-extension-core.js"), atomically: true, encoding: .utf8)
+    try FileManager.default.createDirectory(at: fixture.home.appendingPathComponent(".pi/agent"), withIntermediateDirectories: true)
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: [:]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "pi", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+    XCTAssertEqual(summary.added, 1)
+
+    let extensionDir = fixture.home.appendingPathComponent(".pi/agent/extensions/clawd-on-desk")
+    let extensionText = try String(contentsOf: extensionDir.appendingPathComponent("index.ts"), encoding: .utf8)
+    let core = try String(contentsOf: extensionDir.appendingPathComponent("pi-extension-core.js"), encoding: .utf8)
+    let marker = try fixture.readJSON(".pi/agent/extensions/clawd-on-desk/.clawd-managed.json")
+    XCTAssertEqual(extensionText, "export default {};")
+    XCTAssertEqual(core, "module.exports = {};")
+    XCTAssertEqual(marker["app"] as? String, "clawd-on-desk")
+    XCTAssertEqual(marker["integration"] as? String, "pi")
+    XCTAssertEqual(marker["managed"] as? Bool, true)
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "pi"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 1)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: extensionDir.path))
+  }
+
   func testCursorInstallerPreservesUserHooksAndUninstallsManagedEntries() throws {
     let fixture = try Fixture()
     try fixture.writeJSON([

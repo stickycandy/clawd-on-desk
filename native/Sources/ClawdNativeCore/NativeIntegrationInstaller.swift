@@ -58,6 +58,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "gemini-cli",
     "antigravity-cli",
     "kimi-cli",
+    "pi",
     "kiro-cli",
     "codewhale",
     "qwen-code",
@@ -108,6 +109,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installAntigravity()
       case "kimi-cli":
         return try installKimi()
+      case "pi":
+        return try installPi()
       case "kiro-cli":
         return try installKiro()
       case "codewhale":
@@ -151,6 +154,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallAntigravity()
       case "kimi-cli":
         return try uninstallKimi()
+      case "pi":
+        return try uninstallPi()
       case "kiro-cli":
         return try uninstallKiro()
       case "codewhale":
@@ -644,6 +649,60 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       status: "ok",
       message: "Swift Kimi hooks removed from \(configPath.path)",
       removed: stripped.removed
+    )
+  }
+
+  private func installPi() throws -> NativeIntegrationSummary {
+    let parentDir = homeDirectory.appendingPathComponent(".pi/agent", isDirectory: true)
+    guard fileManager.fileExists(atPath: parentDir.path) || commandExistsOnPath("pi") else {
+      return .init(agentId: "pi", action: "install", status: "skip", message: "Pi not found")
+    }
+    let extensionDir = parentDir.appendingPathComponent("extensions/clawd-on-desk", isDirectory: true)
+    let markerPath = extensionDir.appendingPathComponent(".clawd-managed.json")
+    if fileManager.fileExists(atPath: extensionDir.path), !isManagedPiMarker(markerPath) {
+      return .init(agentId: "pi", action: "install", status: "skip", message: "\(extensionDir.path) exists but is not Clawd-managed")
+    }
+
+    let sourceExtension = projectRoot.appendingPathComponent("hooks/pi-extension.ts")
+    let sourceCore = projectRoot.appendingPathComponent("hooks/pi-extension-core.js")
+    let extensionText = try String(contentsOf: sourceExtension, encoding: .utf8)
+    let coreText = try String(contentsOf: sourceCore, encoding: .utf8)
+    let targetExtension = extensionDir.appendingPathComponent("index.ts")
+    let targetCore = extensionDir.appendingPathComponent("pi-extension-core.js")
+    let existed = fileManager.fileExists(atPath: extensionDir.path)
+    let updated = (try? String(contentsOf: targetExtension, encoding: .utf8)) != extensionText
+      || (try? String(contentsOf: targetCore, encoding: .utf8)) != coreText
+
+    try writeText(extensionText, to: targetExtension)
+    try writeText(coreText, to: targetCore)
+    try writeJSONObject(piMarker(), to: markerPath)
+    return NativeIntegrationSummary(
+      agentId: "pi",
+      action: "install",
+      status: "ok",
+      message: "Swift Pi extension -> \(extensionDir.path)",
+      added: existed ? 0 : 1,
+      updated: updated ? 1 : 0,
+      skipped: updated ? 0 : 1
+    )
+  }
+
+  private func uninstallPi() throws -> NativeIntegrationSummary {
+    let extensionDir = homeDirectory.appendingPathComponent(".pi/agent/extensions/clawd-on-desk", isDirectory: true)
+    let markerPath = extensionDir.appendingPathComponent(".clawd-managed.json")
+    guard fileManager.fileExists(atPath: extensionDir.path) else {
+      return .init(agentId: "pi", action: "uninstall", status: "ok", message: "Swift Pi extension not installed", skipped: 1)
+    }
+    guard isManagedPiMarker(markerPath) else {
+      return .init(agentId: "pi", action: "uninstall", status: "skip", message: "\(extensionDir.path) is not Clawd-managed")
+    }
+    try fileManager.removeItem(at: extensionDir)
+    return NativeIntegrationSummary(
+      agentId: "pi",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Pi extension removed from \(extensionDir.path)",
+      removed: 1
     )
   }
 
@@ -1178,6 +1237,34 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       result.removeLast()
     }
     return result
+  }
+
+  private func commandExistsOnPath(_ command: String) -> Bool {
+    let path = environment["PATH"] ?? ""
+    for dir in path.split(separator: ":") {
+      let candidate = URL(fileURLWithPath: String(dir)).appendingPathComponent(command).path
+      if fileManager.isExecutableFile(atPath: candidate) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func piMarker() -> [String: Any] {
+    [
+      "app": "clawd-on-desk",
+      "integration": "pi",
+      "managed": true,
+      "version": 1,
+      "installedAt": ISO8601DateFormatter().string(from: Date())
+    ]
+  }
+
+  private func isManagedPiMarker(_ markerPath: URL) -> Bool {
+    guard let marker = try? readJSONObject(markerPath, missingIsEmpty: false) else { return false }
+    return marker["app"] as? String == "clawd-on-desk"
+      && marker["integration"] as? String == "pi"
+      && marker["managed"] as? Bool == true
   }
 
   private func resolveNativeHookBinary() -> String? {
