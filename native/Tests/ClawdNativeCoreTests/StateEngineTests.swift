@@ -151,6 +151,63 @@ final class StateEngineTests: XCTestCase {
     XCTAssertEqual(engine.snapshot().sessions.first { $0.id == "s1" }?.badge, "Done")
   }
 
+  func testClaudeStopWithLiveWorkStaysWorkingWithoutDoneBadge() {
+    let engine = StateEngine()
+    engine.updateSession("s1", state: .working, event: "PreToolUse")
+
+    engine.updateSession(
+      "s1",
+      state: .attention,
+      event: "Stop",
+      metadata: SessionMetadata(agentId: "claude-code", backgroundTasksCount: 1)
+    )
+
+    let session = engine.snapshot().sessions.first { $0.id == "s1" }
+    XCTAssertEqual(engine.current(), .working)
+    XCTAssertEqual(session?.state, .working)
+    XCTAssertNil(session?.event)
+    XCTAssertEqual(session?.badge, "Live")
+    XCTAssertEqual(session?.recentEvents, ["PreToolUse"])
+  }
+
+  func testClaudeStopContinuationSignalsStayWorking() {
+    let cronEngine = StateEngine()
+    cronEngine.updateSession(
+      "cron",
+      state: .attention,
+      event: "Stop",
+      metadata: SessionMetadata(agentId: "claude-code", sessionCronsCount: 1)
+    )
+    XCTAssertEqual(cronEngine.current(), .working)
+    XCTAssertEqual(cronEngine.snapshot().sessions.first?.badge, "Live")
+
+    let stopHookEngine = StateEngine()
+    stopHookEngine.updateSession(
+      "hook",
+      state: .attention,
+      event: "Stop",
+      metadata: SessionMetadata(agentId: "claude-code", stopHookActive: true)
+    )
+    XCTAssertEqual(stopHookEngine.current(), .working)
+    XCTAssertEqual(stopHookEngine.snapshot().sessions.first?.badge, "Live")
+  }
+
+  func testNonClaudeStopStillCompletesWithLiveWorkMetadata() {
+    let engine = StateEngine()
+    engine.updateSession(
+      "codex",
+      state: .attention,
+      event: "Stop",
+      metadata: SessionMetadata(agentId: "codex", backgroundTasksCount: 1, stopHookActive: true)
+    )
+
+    let session = engine.snapshot().sessions.first { $0.id == "codex" }
+    XCTAssertEqual(engine.current(), .attention)
+    XCTAssertEqual(session?.state, .idle)
+    XCTAssertEqual(session?.event, "Stop")
+    XCTAssertEqual(session?.badge, "Done")
+  }
+
   func testSessionEndDeletesSessionAndRecomputesDisplayState() {
     let engine = StateEngine(timings: StateTiming(minDisplayMs: [:]))
     engine.updateSession("s1", state: .working, event: "PreToolUse")

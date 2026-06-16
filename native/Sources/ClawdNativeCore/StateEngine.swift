@@ -176,16 +176,19 @@ public final class StateEngine: @unchecked Sendable {
     publish {
       let now = Date()
       let existing = sessionsById[sid]
-      let isSubagentStart = event == "SubagentStart" || event == "subagentStart"
-      let isSubagentStop = event == "SubagentStop" || event == "subagentStop"
-      let suppressDuplicateCompletionVisual = shouldSuppressDuplicateCompletionVisual(existing: existing, state: state, event: event)
+      let holdCompletionAsWorking = shouldHoldCompletionAsWorking(state: state, event: event, metadata: metadata)
+      let effectiveState: ClawdState = holdCompletionAsWorking ? .working : state
+      let effectiveEvent: String? = holdCompletionAsWorking ? nil : event
+      let isSubagentStart = effectiveEvent == "SubagentStart" || effectiveEvent == "subagentStart"
+      let isSubagentStop = effectiveEvent == "SubagentStop" || effectiveEvent == "subagentStop"
+      let suppressDuplicateCompletionVisual = shouldSuppressDuplicateCompletionVisual(existing: existing, state: effectiveState, event: effectiveEvent)
       var recent = existing?.recentEvents ?? []
-      if let event, !event.isEmpty {
+      if let event = effectiveEvent, !event.isEmpty {
         recent.append(event)
         if recent.count > 8 { recent.removeFirst(recent.count - 8) }
       }
       let startedAt = existing?.startedAt ?? now
-      var storedState = storedSessionStateLocked(incoming: state, existing: existing, metadata: metadata)
+      var storedState = storedSessionStateLocked(incoming: effectiveState, existing: existing, metadata: metadata)
       var resumeState: ClawdState?
 
       if isSubagentStop {
@@ -198,7 +201,7 @@ public final class StateEngine: @unchecked Sendable {
             sessionsById[sid] = AgentSession(
               id: sid,
               state: resume,
-              event: event,
+              event: effectiveEvent,
               updatedAt: now,
               startedAt: existing.startedAt,
               metadata: metadata,
@@ -211,7 +214,7 @@ public final class StateEngine: @unchecked Sendable {
           sessionsById[sid] = AgentSession(
             id: sid,
             state: existing.state,
-            event: event,
+            event: effectiveEvent,
             updatedAt: now,
             startedAt: existing.startedAt,
             metadata: metadata,
@@ -224,12 +227,12 @@ public final class StateEngine: @unchecked Sendable {
 
       if isSubagentStart {
         resumeState = existing?.state == .juggling ? existing?.resumeState : existing?.state
-      } else if existing?.state == .juggling && state == .working {
+      } else if existing?.state == .juggling && effectiveState == .working {
         storedState = .juggling
         resumeState = existing?.resumeState
       }
-      if event == "SessionEnd" {
-        let shouldPlaySweeping = state == .sweeping && existing?.metadata.headless != true
+      if effectiveEvent == "SessionEnd" {
+        let shouldPlaySweeping = effectiveState == .sweeping && existing?.metadata.headless != true
         sessionsById.removeValue(forKey: sid)
         if shouldPlaySweeping && !doNotDisturb {
           setStateLocked(.sweeping, force: false)
@@ -241,15 +244,15 @@ public final class StateEngine: @unchecked Sendable {
       sessionsById[sid] = AgentSession(
         id: sid,
         state: storedState,
-        event: event,
+        event: effectiveEvent,
         updatedAt: now,
         startedAt: startedAt,
         metadata: metadata,
         recentEvents: recent,
         resumeState: resumeState
       )
-      if state == .sleeping || state == .miniSleep {
-        sessionsById[sid]?.state = state
+      if effectiveState == .sleeping || effectiveState == .miniSleep {
+        sessionsById[sid]?.state = effectiveState
       }
       if metadata.transientPermissionEvent {
         if doNotDisturb {
@@ -257,11 +260,11 @@ public final class StateEngine: @unchecked Sendable {
         } else {
           setStateLocked(.notification, force: false)
         }
-      } else if state.storesAsIdleOneShot {
+      } else if effectiveState.storesAsIdleOneShot {
         if doNotDisturb || suppressOneShotVisual || suppressDuplicateCompletionVisual {
           recomputeLocked(force: false)
         } else {
-          setStateLocked(state, force: false)
+          setStateLocked(effectiveState, force: false)
         }
       } else {
         recomputeLocked(force: false)
@@ -355,6 +358,13 @@ public final class StateEngine: @unchecked Sendable {
       return existing?.state ?? .idle
     }
     return state.storesAsIdleOneShot ? .idle : state
+  }
+
+  private func shouldHoldCompletionAsWorking(state: ClawdState, event: String?, metadata: SessionMetadata) -> Bool {
+    state == .attention
+      && event == "Stop"
+      && metadata.agentId == "claude-code"
+      && (metadata.backgroundTasksCount > 0 || metadata.sessionCronsCount > 0 || metadata.stopHookActive)
   }
 
   private func shouldSuppressDuplicateCompletionVisual(existing: AgentSession?, state: ClawdState, event: String?) -> Bool {
