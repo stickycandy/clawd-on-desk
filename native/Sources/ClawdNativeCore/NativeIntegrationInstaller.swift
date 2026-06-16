@@ -53,6 +53,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "claude-code",
     "codex",
     "copilot-cli",
+    "gemini-cli",
     "qwen-code"
   ]
 
@@ -89,6 +90,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installQwen()
       case "copilot-cli":
         return try installCopilot()
+      case "gemini-cli":
+        return try installGemini()
       default:
         return nil
       }
@@ -114,6 +117,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallQwen()
       case "copilot-cli":
         return try uninstallCopilot()
+      case "gemini-cli":
+        return try uninstallGemini()
       default:
         return nil
       }
@@ -342,6 +347,66 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       action: "uninstall",
       status: "ok",
       message: "Swift Qwen hooks removed from \(settingsPath.path)",
+      removed: counters.removed
+    )
+  }
+
+  private func installGemini() throws -> NativeIntegrationSummary {
+    let geminiDir = homeDirectory.appendingPathComponent(".gemini", isDirectory: true)
+    guard fileManager.fileExists(atPath: geminiDir.path) else {
+      return .init(agentId: "gemini-cli", action: "install", status: "skip", message: "\(geminiDir.path) not found")
+    }
+    let settingsPath = geminiDir.appendingPathComponent("settings.json")
+    var settings = try readJSONObject(settingsPath)
+    var counters = ChangeCounters()
+    if normalizeGeminiDisabledHooks(settings: &settings) {
+      counters.updated += 1
+    }
+    let nodeBin = resolveNodeBin(existingSettings: settings, marker: "gemini-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/gemini-hook.js").path
+
+    for event in Self.geminiEvents {
+      let desiredEntry: [String: Any] = [
+        "matcher": "*",
+        "hooks": [[
+          "name": "clawd",
+          "type": "command",
+          "command": hookCommand(agentId: "gemini-cli", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "gemini-hook.js")
+        ]]
+      ]
+      counters.merge(syncGeminiHookEntry(
+        settings: &settings,
+        event: event,
+        marker: "gemini-hook.js",
+        desiredEntry: desiredEntry
+      ))
+    }
+    try writeJSONObject(settings, to: settingsPath)
+    return NativeIntegrationSummary(
+      agentId: "gemini-cli",
+      action: "install",
+      status: "ok",
+      message: "Swift Gemini hooks -> \(settingsPath.path)",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      removed: counters.removed
+    )
+  }
+
+  private func uninstallGemini() throws -> NativeIntegrationSummary {
+    let settingsPath = homeDirectory.appendingPathComponent(".gemini/settings.json")
+    var settings = try readJSONObject(settingsPath, missingIsEmpty: false)
+    var counters = ChangeCounters()
+    for event in Self.geminiEvents {
+      counters.merge(removeCommandHooks(settings: &settings, event: event, marker: "gemini-hook.js"))
+    }
+    try writeJSONObject(settings, to: settingsPath, backup: true)
+    return NativeIntegrationSummary(
+      agentId: "gemini-cli",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Gemini hooks removed from \(settingsPath.path)",
       removed: counters.removed
     )
   }
@@ -622,6 +687,82 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return counters
   }
 
+  private func syncGeminiHookEntry(
+    settings: inout [String: Any],
+    event: String,
+    marker: String,
+    desiredEntry: [String: Any]
+  ) -> ChangeCounters {
+    var hooks = settings["hooks"] as? [String: Any] ?? [:]
+    let entries = hooks[event] as? [Any] ?? []
+    var next: [Any] = []
+    var counters = ChangeCounters()
+    var wroteDedicatedEntry = false
+
+    for entryValue in entries {
+      guard var entry = entryValue as? [String: Any] else {
+        next.append(entryValue)
+        continue
+      }
+
+      if containsMarker(entry, marker: marker), entry["hooks"] == nil {
+        if wroteDedicatedEntry {
+          counters.removed += 1
+          continue
+        }
+        if NSDictionary(dictionary: entry).isEqual(to: desiredEntry) {
+          counters.skipped += 1
+        } else {
+          counters.updated += 1
+        }
+        next.append(desiredEntry)
+        wroteDedicatedEntry = true
+        continue
+      }
+
+      guard let inner = entry["hooks"] as? [Any] else {
+        next.append(entry)
+        continue
+      }
+      let clawdCount = inner.compactMap { $0 as? [String: Any] }.filter { containsMarker($0, marker: marker) }.count
+      guard clawdCount > 0 else {
+        next.append(entry)
+        continue
+      }
+
+      let otherHooks = inner.filter { hook in
+        guard let hookDict = hook as? [String: Any] else { return true }
+        return !containsMarker(hookDict, marker: marker)
+      }
+      if !otherHooks.isEmpty {
+        entry["hooks"] = otherHooks
+        next.append(entry)
+        counters.updated += 1
+        continue
+      }
+
+      if wroteDedicatedEntry {
+        counters.removed += 1
+        continue
+      }
+      if NSDictionary(dictionary: entry).isEqual(to: desiredEntry) {
+        counters.skipped += 1
+      } else {
+        counters.updated += 1
+      }
+      next.append(desiredEntry)
+      wroteDedicatedEntry = true
+    }
+
+    if !wroteDedicatedEntry {
+      next.append(desiredEntry)
+      counters.added += 1
+    }
+    hooks[event] = next
+    settings["hooks"] = hooks
+    return counters
+  }
+
   private func removeCommandHooks(settings: inout [String: Any], event: String, marker: String) -> ChangeCounters {
     var hooks = settings["hooks"] as? [String: Any] ?? [:]
     guard var entries = hooks[event] as? [Any] else { return ChangeCounters() }
@@ -873,6 +1014,41 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return !entries.isEmpty
   }
 
+  private func normalizeGeminiDisabledHooks(settings: inout [String: Any]) -> Bool {
+    guard var hooksConfig = settings["hooksConfig"] as? [String: Any],
+          let disabled = hooksConfig["disabled"] as? [Any]
+    else { return false }
+
+    var next: [Any] = []
+    var sawClawd = false
+    var changed = false
+    for entry in disabled {
+      if let string = entry as? String, string == "clawd" {
+        if sawClawd {
+          changed = true
+          continue
+        }
+        sawClawd = true
+        next.append(entry)
+        continue
+      }
+      if containsMarker(entry, marker: "gemini-hook.js") {
+        if !sawClawd {
+          next.append("clawd")
+          sawClawd = true
+        }
+        changed = true
+        continue
+      }
+      next.append(entry)
+    }
+
+    guard changed else { return false }
+    hooksConfig["disabled"] = next
+    settings["hooksConfig"] = hooksConfig
+    return true
+  }
+
   private func quote(_ value: String) -> String {
     "\"\(value.replacingOccurrences(of: "\"", with: "\\\""))\""
   }
@@ -939,6 +1115,17 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
   ]
 
   private static let qwenMatcherlessEvents: Set<String> = ["UserPromptSubmit", "Stop"]
+
+  private static let geminiEvents = [
+    "SessionStart",
+    "SessionEnd",
+    "BeforeAgent",
+    "AfterAgent",
+    "BeforeTool",
+    "AfterTool",
+    "Notification",
+    "PreCompress"
+  ]
 
   private static let copilotEvents = [
     "sessionStart",

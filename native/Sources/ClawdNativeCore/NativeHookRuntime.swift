@@ -29,6 +29,8 @@ public struct NativeHookRuntime {
       return qwenRoute(payload: object)
     case "copilot-cli":
       return copilotRoute(payload: object)
+    case "gemini-cli":
+      return geminiRoute(payload: object)
     default:
       return .none
     }
@@ -58,6 +60,21 @@ public struct NativeHookRuntime {
 
   public static func encode(_ value: JSONValue) -> Data {
     (try? JSONEncoder().encode(value)) ?? Data("{}".utf8)
+  }
+
+  public static func stdout(agentId: String, event: String, stdin: Data? = nil) -> String? {
+    guard agentId == "gemini-cli" else { return nil }
+    var hookEvent = event
+    if let stdin,
+       case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: stdin),
+       let payloadEvent = object.string("hook_event_name"),
+       !payloadEvent.isEmpty {
+      hookEvent = payloadEvent
+    }
+    if hookEvent == "BeforeTool" || hookEvent == "AfterTool" {
+      return #"{"decision":"allow"}"#
+    }
+    return "{}"
   }
 
   private func claudeRoute(payload: [String: JSONValue]) -> Route {
@@ -219,6 +236,27 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func geminiRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("hook_event_name") ?? event
+    guard var mapped = Self.geminiState[hookEvent] else { return .none }
+    if hookEvent == "AfterTool", geminiToolResponseHasError(payload) {
+      mapped = (state: "error", event: "PostToolUseFailure", preserveState: false)
+    } else if hookEvent == "SessionEnd", payload.string("reason") == "clear" || payload.string("source") == "clear" {
+      mapped = (state: "sweeping", event: "SessionEnd", preserveState: false)
+    }
+    var body = baseState(
+      state: mapped.state,
+      sessionId: normalizeSessionId(payload.string("session_id"), prefix: "gemini"),
+      event: mapped.event,
+      agentId: "gemini-cli",
+      payload: payload
+    )
+    if mapped.preserveState {
+      body["preserve_state"] = .bool(true)
+    }
+    return .state(.object(body))
+  }
+
   private func baseState(
     state: String,
     sessionId: String,
@@ -295,8 +333,24 @@ public struct NativeHookRuntime {
       return ["qwen"]
     case "copilot-cli":
       return ["copilot"]
+    case "gemini-cli":
+      return ["gemini"]
     default:
       return []
+    }
+  }
+
+  private func geminiToolResponseHasError(_ payload: [String: JSONValue]) -> Bool {
+    guard let response = payload.object("tool_response"), let error = response["error"] else { return false }
+    switch error {
+    case .null:
+      return false
+    case .bool(let value):
+      return value
+    case .string(let value):
+      return !value.isEmpty
+    default:
+      return true
     }
   }
 
@@ -834,6 +888,17 @@ public struct NativeHookRuntime {
     "subagentStart": "juggling",
     "subagentStop": "working",
     "preCompact": "sweeping"
+  ]
+
+  private static let geminiState: [String: (state: String, event: String, preserveState: Bool)] = [
+    "SessionStart": ("idle", "SessionStart", false),
+    "SessionEnd": ("sleeping", "SessionEnd", false),
+    "BeforeAgent": ("thinking", "UserPromptSubmit", false),
+    "BeforeTool": ("working", "PreToolUse", false),
+    "AfterTool": ("working", "PostToolUse", false),
+    "AfterAgent": ("idle", "AfterAgent", false),
+    "Notification": ("notification", "Notification", false),
+    "PreCompress": ("idle", "PreCompress", true)
   ]
 
   private static let skippedCodexResponseItemTypes: Set<String> = [

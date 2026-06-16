@@ -98,6 +98,51 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertTrue(String(describing: permission).contains("timeout = 600000"))
   }
 
+  func testGeminiInstallerPreservesUserHooksAndNormalizesDisabledMarker() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "hooksConfig": [
+        "disabled": ["node /tmp/gemini-hook.js BeforeTool", "other"]
+      ],
+      "hooks": [
+        "BeforeTool": [[
+          "matcher": "*",
+          "hooks": [
+            [
+              "type": "command",
+              "command": "echo user"
+            ],
+            [
+              "name": "clawd",
+              "type": "command",
+              "command": "node /old/gemini-hook.js BeforeTool"
+            ]
+          ]
+        ]]
+      ]
+    ], to: ".gemini/settings.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "gemini-cli", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+
+    let settings = try fixture.readJSON(".gemini/settings.json")
+    let hooksConfig = try XCTUnwrap(settings["hooksConfig"] as? [String: Any])
+    XCTAssertEqual(hooksConfig["disabled"] as? [String], ["clawd", "other"])
+
+    let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+    let beforeTool = try XCTUnwrap(hooks["BeforeTool"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: beforeTool).contains("echo user"))
+    XCTAssertTrue(String(describing: beforeTool).contains("gemini-hook.js"))
+    XCTAssertTrue(String(describing: beforeTool).contains("/opt/homebrew/bin/node"))
+    let preCompress = try XCTUnwrap(hooks["PreCompress"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: preCompress).contains("PreCompress"))
+  }
+
   func testCopilotInstallerSkipsPermissionWhenUserHookExists() throws {
     let fixture = try Fixture()
     let copilotHome = fixture.home.appendingPathComponent(".copilot")

@@ -58,6 +58,57 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertNotNil(body["permission_suggestions"])
   }
 
+  func testGeminiAfterAgentStaysNeutralIdleEvent() throws {
+    let payload = Data(#"{"session_id":"s1","cwd":"/repo"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "gemini-cli", event: "AfterAgent", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "gemini-cli")
+    XCTAssertEqual(body.string("session_id"), "gemini:s1")
+    XCTAssertEqual(body.string("state"), "idle")
+    XCTAssertEqual(body.string("event"), "AfterAgent")
+    XCTAssertEqual(body.string("cwd"), "/repo")
+  }
+
+  func testGeminiAfterToolErrorBecomesPostToolUseFailure() throws {
+    let payload = Data(#"{"session_id":"s1","tool_response":{"error":"failed"}}"#.utf8)
+    let route = NativeHookRuntime(agentId: "gemini-cli", event: "AfterTool", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("state"), "error")
+    XCTAssertEqual(body.string("event"), "PostToolUseFailure")
+  }
+
+  func testGeminiSessionEndClearBecomesSweeping() throws {
+    let payload = Data(#"{"session_id":"s1","reason":"clear"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "gemini-cli", event: "SessionEnd", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("state"), "sweeping")
+    XCTAssertEqual(body.string("event"), "SessionEnd")
+  }
+
+  func testGeminiPreCompressPreservesState() throws {
+    let payload = Data(#"{"hook_event_name":"PreCompress","session_id":"gemini:s1"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "gemini-cli", event: "BeforeTool", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("session_id"), "gemini:s1")
+    XCTAssertEqual(body.string("state"), "idle")
+    XCTAssertEqual(body.string("event"), "PreCompress")
+    XCTAssertEqual(body.bool("preserve_state"), true)
+  }
+
+  func testGeminiStdoutUsesPayloadHookEventOverride() throws {
+    let payload = Data(#"{"hook_event_name":"PreCompress"}"#.utf8)
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "gemini-cli", event: "BeforeTool", stdin: payload), "{}")
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "gemini-cli", event: "AfterTool"), #"{"decision":"allow"}"#)
+  }
+
   func testQwenPermissionIncludesEmptySuggestionsForHookParity() throws {
     let payload = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/repo"}"#.utf8)
     let route = NativeHookRuntime(agentId: "qwen-code", event: "PermissionRequest", environment: [:]).route(stdin: payload)
@@ -146,6 +197,11 @@ private extension [String: JSONValue] {
 
   func array(_ key: String) -> [JSONValue]? {
     if case .array(let value)? = self[key] { return value }
+    return nil
+  }
+
+  func bool(_ key: String) -> Bool? {
+    if case .bool(let value)? = self[key] { return value }
     return nil
   }
 }
