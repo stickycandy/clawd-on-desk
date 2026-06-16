@@ -122,6 +122,35 @@ final class StateEngineTests: XCTestCase {
     XCTAssertEqual(engine.current(), .idle)
   }
 
+  func testDuplicateCompletionDoesNotReplayAttentionWithoutProgress() {
+    let engine = StateEngine()
+    engine.updateSession("s1", state: .working, event: "PreToolUse")
+    engine.updateSession("s1", state: .attention, event: "Stop")
+    XCTAssertEqual(engine.current(), .attention)
+
+    engine.setState(.idle, force: true)
+    engine.updateSession("s1", state: .attention, event: "Stop")
+
+    let session = engine.snapshot().sessions.first { $0.id == "s1" }
+    XCTAssertEqual(engine.current(), .idle)
+    XCTAssertEqual(session?.state, .idle)
+    XCTAssertEqual(session?.event, "Stop")
+    XCTAssertEqual(session?.badge, "Done")
+  }
+
+  func testCompletionReplaysAfterNewProgress() {
+    let engine = StateEngine()
+    engine.updateSession("s1", state: .working, event: "PreToolUse")
+    engine.updateSession("s1", state: .attention, event: "Stop")
+    engine.setState(.idle, force: true)
+
+    engine.updateSession("s1", state: .working, event: "PreToolUse")
+    engine.updateSession("s1", state: .attention, event: "Stop")
+
+    XCTAssertEqual(engine.current(), .attention)
+    XCTAssertEqual(engine.snapshot().sessions.first { $0.id == "s1" }?.badge, "Done")
+  }
+
   func testSessionEndDeletesSessionAndRecomputesDisplayState() {
     let engine = StateEngine(timings: StateTiming(minDisplayMs: [:]))
     engine.updateSession("s1", state: .working, event: "PreToolUse")

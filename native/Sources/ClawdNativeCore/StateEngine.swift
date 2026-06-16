@@ -178,6 +178,7 @@ public final class StateEngine: @unchecked Sendable {
       let existing = sessionsById[sid]
       let isSubagentStart = event == "SubagentStart" || event == "subagentStart"
       let isSubagentStop = event == "SubagentStop" || event == "subagentStop"
+      let suppressDuplicateCompletionVisual = shouldSuppressDuplicateCompletionVisual(existing: existing, state: state, event: event)
       var recent = existing?.recentEvents ?? []
       if let event, !event.isEmpty {
         recent.append(event)
@@ -257,7 +258,7 @@ public final class StateEngine: @unchecked Sendable {
           setStateLocked(.notification, force: false)
         }
       } else if state.storesAsIdleOneShot {
-        if doNotDisturb || suppressOneShotVisual {
+        if doNotDisturb || suppressOneShotVisual || suppressDuplicateCompletionVisual {
           recomputeLocked(force: false)
         } else {
           setStateLocked(state, force: false)
@@ -356,6 +357,25 @@ public final class StateEngine: @unchecked Sendable {
     return state.storesAsIdleOneShot ? .idle : state
   }
 
+  private func shouldSuppressDuplicateCompletionVisual(existing: AgentSession?, state: ClawdState, event: String?) -> Bool {
+    guard state == .attention,
+          let event,
+          Self.completionEvents.contains(event),
+          let existing,
+          existing.state == .idle || existing.state == .sleeping
+    else { return false }
+    return hasCompletionTailWithoutProgress(existing)
+  }
+
+  private func hasCompletionTailWithoutProgress(_ session: AgentSession) -> Bool {
+    for event in session.recentEvents.reversed() {
+      if Self.completionEvents.contains(event) { return true }
+      if Self.completionHousekeepingEvents.contains(event) { continue }
+      return false
+    }
+    return false
+  }
+
   private func setStateLocked(_ state: ClawdState, force: Bool) {
     guard force || state != currentState else { return }
     let elapsedMs = Int(Date().timeIntervalSince(stateChangedAt) * 1000)
@@ -429,4 +449,11 @@ public final class StateEngine: @unchecked Sendable {
       updatedAt: Date()
     )
   }
+
+  private static let completionEvents: Set<String> = ["Stop", "event_msg:task_complete"]
+  private static let completionHousekeepingEvents: Set<String> = [
+    "Notification",
+    "stale-cleanup",
+    "event_msg:token_count"
+  ]
 }
