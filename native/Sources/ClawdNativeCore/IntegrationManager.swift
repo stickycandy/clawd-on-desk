@@ -109,11 +109,41 @@ public final class IntegrationManager: @unchecked Sendable {
       return IntegrationResult(
         agentId: agentId,
         command: command,
-        status: process.terminationStatus == 0 ? "ok" : "error",
+        status: Self.normalizedProcessStatus(
+          terminationStatus: process.terminationStatus,
+          output: output
+        ),
         output: output
       )
     } catch {
       return IntegrationResult(agentId: agentId, command: command, status: "error", output: error.localizedDescription)
     }
+  }
+
+  static func normalizedProcessStatus(terminationStatus: Int32, output: String) -> String {
+    guard terminationStatus == 0 else { return "error" }
+    return outputLooksLikeMissingInstallSkip(output) ? "skip" : "ok"
+  }
+
+  private static func outputLooksLikeMissingInstallSkip(_ output: String) -> Bool {
+    output
+      .split(whereSeparator: \.isNewline)
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+      .contains { line in
+        if line.contains("not installed") && (line.contains("skipping") || line.contains("skipped")) {
+          return true
+        }
+        if line.contains("config not found") {
+          return true
+        }
+        guard line.contains("not found") else { return false }
+        guard line.contains("skipping") || line.contains("skipped") else { return false }
+        return line.contains("hook")
+          || line.contains("plugin")
+          || line.contains("extension")
+          || line.contains("registration")
+          || line.contains("cleanup")
+          || line.contains("disable")
+      }
   }
 }

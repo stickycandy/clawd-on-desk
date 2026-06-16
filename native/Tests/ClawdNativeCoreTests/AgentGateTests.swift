@@ -37,6 +37,27 @@ final class AgentGateTests: XCTestCase {
     XCTAssertTrue(AgentGate.shouldSyncAgentIntegration(prefs, "copilot-cli"))
   }
 
+  func testIntegrationManagerNormalizesMissingAgentInstallerSkips() {
+    XCTAssertEqual(
+      IntegrationManager.normalizedProcessStatus(
+        terminationStatus: 0,
+        output: "Clawd: ~/.reasonix/ not found — skipping Reasonix hook registration"
+      ),
+      "skip"
+    )
+    XCTAssertEqual(
+      IntegrationManager.normalizedProcessStatus(
+        terminationStatus: 0,
+        output: "  Added: 0, updated: 0, skipped: 12"
+      ),
+      "ok"
+    )
+    XCTAssertEqual(
+      IntegrationManager.normalizedProcessStatus(terminationStatus: 1, output: "boom"),
+      "error"
+    )
+  }
+
   func testRegistryIncludesCurrentAgents() {
     let ids = Set(AgentRegistry.all.map(\.id))
     XCTAssertTrue(ids.isSuperset(of: [
