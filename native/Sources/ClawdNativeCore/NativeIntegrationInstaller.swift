@@ -59,6 +59,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "antigravity-cli",
     "kimi-cli",
     "pi",
+    "openclaw",
     "kiro-cli",
     "codewhale",
     "qwen-code",
@@ -111,6 +112,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installKimi()
       case "pi":
         return try installPi()
+      case "openclaw":
+        return try installOpenClaw()
       case "kiro-cli":
         return try installKiro()
       case "codewhale":
@@ -156,6 +159,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallKimi()
       case "pi":
         return try uninstallPi()
+      case "openclaw":
+        return try uninstallOpenClaw()
       case "kiro-cli":
         return try uninstallKiro()
       case "codewhale":
@@ -703,6 +708,59 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       status: "ok",
       message: "Swift Pi extension removed from \(extensionDir.path)",
       removed: 1
+    )
+  }
+
+  private func installOpenClaw() throws -> NativeIntegrationSummary {
+    let paths = resolveOpenClawPaths()
+    let pluginDir = projectRoot.appendingPathComponent("hooks/openclaw-plugin", isDirectory: true).path
+    let stateDirExists = fileManager.fileExists(atPath: paths.stateDir.path)
+    let configExists = fileManager.fileExists(atPath: paths.configPath.path)
+    guard stateDirExists || configExists else {
+      return .init(agentId: "openclaw", action: "install", status: "skip", message: "OpenClaw not found")
+    }
+    guard configExists else {
+      return .init(agentId: "openclaw", action: "install", status: "skip", message: "\(paths.configPath.path) missing")
+    }
+    var config = try readJSONObject(paths.configPath, missingIsEmpty: false)
+    let linked = ensureOpenClawConfigLinked(config: &config, pluginDir: pluginDir)
+    if let reason = linked.reason {
+      return .init(agentId: "openclaw", action: "install", status: "skip", message: reason)
+    }
+    if linked.updated {
+      try writeJSONObject(config, to: paths.configPath)
+    }
+    return NativeIntegrationSummary(
+      agentId: "openclaw",
+      action: "install",
+      status: "ok",
+      message: "Swift OpenClaw plugin -> \(paths.configPath.path)",
+      added: linked.updated ? 1 : 0,
+      skipped: linked.updated ? 0 : 1
+    )
+  }
+
+  private func uninstallOpenClaw() throws -> NativeIntegrationSummary {
+    let paths = resolveOpenClawPaths()
+    let pluginDir = projectRoot.appendingPathComponent("hooks/openclaw-plugin", isDirectory: true).path
+    guard fileManager.fileExists(atPath: paths.configPath.path) else {
+      return .init(agentId: "openclaw", action: "uninstall", status: "ok", message: "\(paths.configPath.path) missing", skipped: 1)
+    }
+    var config = try readJSONObject(paths.configPath, missingIsEmpty: false)
+    guard !hasOpenClawIncludeDirective(config) else {
+      return .init(agentId: "openclaw", action: "uninstall", status: "skip", message: "config-has-include")
+    }
+    let removed = removeOpenClawConfigLink(config: &config, pluginDir: pluginDir)
+    if removed {
+      try writeJSONObject(config, to: paths.configPath, backup: true)
+    }
+    return NativeIntegrationSummary(
+      agentId: "openclaw",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift OpenClaw plugin removed from \(paths.configPath.path)",
+      skipped: removed ? 0 : 1,
+      removed: removed ? 1 : 0
     )
   }
 
@@ -1265,6 +1323,143 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return marker["app"] as? String == "clawd-on-desk"
       && marker["integration"] as? String == "pi"
       && marker["managed"] as? Bool == true
+  }
+
+  private func resolveOpenClawPaths() -> (stateDir: URL, configPath: URL) {
+    let stateDir = environment["OPENCLAW_STATE_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let configPath = environment["OPENCLAW_CONFIG_PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedStateDir = stateDir?.isEmpty == false
+      ? URL(fileURLWithPath: stateDir!)
+      : homeDirectory.appendingPathComponent(".openclaw", isDirectory: true)
+    let resolvedConfigPath = configPath?.isEmpty == false
+      ? URL(fileURLWithPath: configPath!)
+      : resolvedStateDir.appendingPathComponent("openclaw.json")
+    return (resolvedStateDir, resolvedConfigPath)
+  }
+
+  private func ensureOpenClawConfigLinked(config: inout [String: Any], pluginDir: String) -> (updated: Bool, reason: String?) {
+    if hasOpenClawIncludeDirective(config) {
+      return (false, "config-has-include")
+    }
+
+    var updated = false
+    if config["plugins"] == nil {
+      config["plugins"] = [:] as [String: Any]
+      updated = true
+    }
+    guard var plugins = config["plugins"] as? [String: Any] else {
+      return (false, "plugins-not-object")
+    }
+
+    if plugins["load"] == nil {
+      plugins["load"] = [:] as [String: Any]
+      updated = true
+    }
+    guard var load = plugins["load"] as? [String: Any] else {
+      return (false, "plugins-load-not-object")
+    }
+    if load["paths"] == nil {
+      load["paths"] = [] as [Any]
+      updated = true
+    }
+    guard var paths = load["paths"] as? [Any] else {
+      return (false, "plugins-load-paths-not-array")
+    }
+    let pathIndex = openClawPluginPathIndex(paths, pluginDir: pluginDir)
+    if pathIndex == nil {
+      paths.append(pluginDir)
+      updated = true
+    } else if let pathIndex, paths[pathIndex] as? String != pluginDir {
+      paths[pathIndex] = pluginDir
+      updated = true
+    }
+    load["paths"] = paths
+    plugins["load"] = load
+
+    if plugins["entries"] == nil {
+      plugins["entries"] = [:] as [String: Any]
+      updated = true
+    }
+    guard var entries = plugins["entries"] as? [String: Any] else {
+      return (false, "plugins-entries-not-object")
+    }
+    var currentEntry = entries["clawd-on-desk"] as? [String: Any] ?? [:]
+    var currentHooks = currentEntry["hooks"] as? [String: Any] ?? [:]
+    if currentEntry["enabled"] as? Bool != true {
+      currentEntry["enabled"] = true
+      updated = true
+    }
+    if currentHooks["allowConversationAccess"] as? Bool != false {
+      currentHooks["allowConversationAccess"] = false
+      currentEntry["hooks"] = currentHooks
+      updated = true
+    } else if currentEntry["hooks"] == nil {
+      currentEntry["hooks"] = currentHooks
+      updated = true
+    }
+    if !jsonValueEquals(entries["clawd-on-desk"], currentEntry) {
+      entries["clawd-on-desk"] = currentEntry
+      updated = true
+    }
+    plugins["entries"] = entries
+    config["plugins"] = plugins
+    return (updated, nil)
+  }
+
+  private func removeOpenClawConfigLink(config: inout [String: Any], pluginDir: String) -> Bool {
+    var updated = false
+    guard var plugins = config["plugins"] as? [String: Any] else { return false }
+    if var load = plugins["load"] as? [String: Any],
+       var paths = load["paths"] as? [Any],
+       let index = openClawPluginPathIndex(paths, pluginDir: pluginDir) {
+      paths.remove(at: index)
+      load["paths"] = paths
+      plugins["load"] = load
+      updated = true
+    }
+    if var entries = plugins["entries"] as? [String: Any], entries["clawd-on-desk"] != nil {
+      entries.removeValue(forKey: "clawd-on-desk")
+      plugins["entries"] = entries
+      updated = true
+    }
+    if updated {
+      config["plugins"] = plugins
+    }
+    return updated
+  }
+
+  private func openClawPluginPathIndex(_ paths: [Any], pluginDir: String) -> Int? {
+    let normalizedPluginDir = normalizeOpenClawPath(pluginDir)
+    for (index, entry) in paths.enumerated() {
+      guard let path = entry as? String else { continue }
+      let normalized = normalizeOpenClawPath(path)
+      if normalized == normalizedPluginDir { return index }
+      if openClawPathLooksAbsolute(normalized), URL(fileURLWithPath: normalized).lastPathComponent == "openclaw-plugin" {
+        return index
+      }
+    }
+    return nil
+  }
+
+  private func normalizeOpenClawPath(_ value: String) -> String {
+    value.replacingOccurrences(of: "\\", with: "/")
+  }
+
+  private func openClawPathLooksAbsolute(_ value: String) -> Bool {
+    value.hasPrefix("/") || value.range(of: #"^[A-Za-z]:/"#, options: .regularExpression) != nil
+  }
+
+  private func hasOpenClawIncludeDirective(_ value: Any) -> Bool {
+    if let array = value as? [Any] {
+      return array.contains { hasOpenClawIncludeDirective($0) }
+    }
+    guard let object = value as? [String: Any] else { return false }
+    for (key, entry) in object {
+      if key == "$include" { return true }
+      if key == "include", entry is [Any] { return true }
+      if hasOpenClawIncludeDirective(entry) { return true }
+    }
+    return false
   }
 
   private func resolveNativeHookBinary() -> String? {

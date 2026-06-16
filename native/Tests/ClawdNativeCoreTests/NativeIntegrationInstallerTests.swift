@@ -324,6 +324,61 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: extensionDir.path))
   }
 
+  func testOpenClawInstallerLinksPluginAndUninstallsManagedEntry() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "plugins": [
+        "load": [
+          "paths": [
+            "/user/plugin",
+            "/old/openclaw-plugin"
+          ]
+        ],
+        "entries": [
+          "user-plugin": [
+            "enabled": true
+          ],
+          "clawd-on-desk": [
+            "custom": "keep"
+          ]
+        ]
+      ]
+    ], to: ".openclaw/openclaw.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: [:]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "openclaw", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+    XCTAssertEqual(summary.added, 1)
+
+    let installed = try fixture.readJSON(".openclaw/openclaw.json")
+    let plugins = try XCTUnwrap(installed["plugins"] as? [String: Any])
+    let load = try XCTUnwrap(plugins["load"] as? [String: Any])
+    let paths = try XCTUnwrap(load["paths"] as? [String])
+    XCTAssertEqual(paths, ["/user/plugin", "\(fixture.projectRoot.path)/hooks/openclaw-plugin"])
+    let entries = try XCTUnwrap(plugins["entries"] as? [String: Any])
+    XCTAssertNotNil(entries["user-plugin"])
+    let clawd = try XCTUnwrap(entries["clawd-on-desk"] as? [String: Any])
+    XCTAssertEqual(clawd["custom"] as? String, "keep")
+    XCTAssertEqual(clawd["enabled"] as? Bool, true)
+    let hooks = try XCTUnwrap(clawd["hooks"] as? [String: Any])
+    XCTAssertEqual(hooks["allowConversationAccess"] as? Bool, false)
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "openclaw"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 1)
+    let uninstalled = try fixture.readJSON(".openclaw/openclaw.json")
+    let uninstalledPlugins = try XCTUnwrap(uninstalled["plugins"] as? [String: Any])
+    let uninstalledLoad = try XCTUnwrap(uninstalledPlugins["load"] as? [String: Any])
+    XCTAssertEqual(try XCTUnwrap(uninstalledLoad["paths"] as? [String]), ["/user/plugin"])
+    let uninstalledEntries = try XCTUnwrap(uninstalledPlugins["entries"] as? [String: Any])
+    XCTAssertNotNil(uninstalledEntries["user-plugin"])
+    XCTAssertNil(uninstalledEntries["clawd-on-desk"])
+  }
+
   func testCursorInstallerPreservesUserHooksAndUninstallsManagedEntries() throws {
     let fixture = try Fixture()
     try fixture.writeJSON([
