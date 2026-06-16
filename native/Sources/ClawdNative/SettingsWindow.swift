@@ -34,7 +34,7 @@ final class SettingsWindowController: NSWindowController {
   private static let labelWidth: CGFloat = 150
   private static let fieldWidth: CGFloat = 380
   private static let rowWidth: CGFloat = 560
-  private static let textWidth: CGFloat = 660
+  private static let textWidth: CGFloat = 560
 
   private static func formatDouble(_ value: Double) -> String {
     let rounded = (value * 1000).rounded() / 1000
@@ -143,6 +143,7 @@ final class SettingsWindowController: NSWindowController {
       view.removeFromSuperview()
     }
     let prefs = preferencesStore.get()
+    window?.title = localized("settingsTitle", prefs: prefs)
     addFullWidthView(tabControl(prefs))
     addFullWidthView(separator())
 
@@ -181,40 +182,40 @@ final class SettingsWindowController: NSWindowController {
   private func addGeneralSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("general", prefs: prefs)))
     stack.addArrangedSubview(languageRow(prefs))
-    stack.addArrangedSubview(booleanRow("Show Dock icon", key: "showDock", value: prefs.showDock))
-    stack.addArrangedSubview(booleanRow("Open at login", key: "openAtLogin", value: prefs.openAtLogin))
-    stack.addArrangedSubview(booleanRow("Bubble follows pet", key: "bubbleFollowPet", value: prefs.bubbleFollowPet))
-    stack.addArrangedSubview(booleanRow("Low power idle", key: "lowPowerIdleMode", value: prefs.lowPowerIdleMode))
-    stack.addArrangedSubview(booleanRow("Keep awake while working", key: "keepAwakeWhileWorking", value: prefs.keepAwakeWhileWorking))
-    stack.addArrangedSubview(booleanRow("Allow edge pinning", key: "allowEdgePinning", value: prefs.allowEdgePinning))
-    stack.addArrangedSubview(booleanRow("Keep size across displays", key: "keepSizeAcrossDisplays", value: prefs.keepSizeAcrossDisplays))
-    stack.addArrangedSubview(booleanRow("Enable mobile preview", key: "mobilePreviewEnabled", value: prefs.mobilePreviewEnabled))
-    stack.addArrangedSubview(booleanRow("Mute sounds", key: "soundMuted", value: prefs.soundMuted))
-    stack.addArrangedSubview(textRow(label: "Sound volume", value: Self.formatDouble(prefs.soundVolume), identifier: "number-soundVolume", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(booleanRow("Flash on complete", key: "flashTaskbarOnComplete", value: prefs.flashTaskbarOnComplete))
-    stack.addArrangedSubview(textRow(label: "Flash interval ms", value: String(prefs.flashIntervalMs), identifier: "number-flashIntervalMs", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Flash duration ms", value: String(prefs.flashDurationMs), identifier: "number-flashDurationMs", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(booleanRow("Auto-approve all permissions", key: "autoApproveAllPermissions", value: prefs.autoApproveAllPermissions))
+    stack.addArrangedSubview(booleanRow(localized("showDock", prefs: prefs), key: "showDock", value: prefs.showDock))
+    stack.addArrangedSubview(booleanRow(localized("openAtLogin", prefs: prefs), key: "openAtLogin", value: prefs.openAtLogin))
+    stack.addArrangedSubview(booleanRow(localized("bubbleFollowPet", prefs: prefs), key: "bubbleFollowPet", value: prefs.bubbleFollowPet))
+    stack.addArrangedSubview(booleanRow(localized("lowPowerIdle", prefs: prefs), key: "lowPowerIdleMode", value: prefs.lowPowerIdleMode))
+    stack.addArrangedSubview(booleanRow(localized("keepAwakeWhileWorking", prefs: prefs), key: "keepAwakeWhileWorking", value: prefs.keepAwakeWhileWorking))
+    stack.addArrangedSubview(booleanRow(localized("allowEdgePinning", prefs: prefs), key: "allowEdgePinning", value: prefs.allowEdgePinning))
+    stack.addArrangedSubview(booleanRow(localized("keepSizeAcrossDisplays", prefs: prefs), key: "keepSizeAcrossDisplays", value: prefs.keepSizeAcrossDisplays))
+    stack.addArrangedSubview(booleanRow(localized("enableMobilePreview", prefs: prefs), key: "mobilePreviewEnabled", value: prefs.mobilePreviewEnabled))
+    stack.addArrangedSubview(booleanRow(localized("muteSounds", prefs: prefs), key: "soundMuted", value: prefs.soundMuted))
+    stack.addArrangedSubview(textRow(label: localized("soundVolume", prefs: prefs), value: Self.formatDouble(prefs.soundVolume), identifier: "number-soundVolume", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(booleanRow(localized("flashOnComplete", prefs: prefs), key: "flashTaskbarOnComplete", value: prefs.flashTaskbarOnComplete))
+    stack.addArrangedSubview(textRow(label: localized("flashIntervalMs", prefs: prefs), value: String(prefs.flashIntervalMs), identifier: "number-flashIntervalMs", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("flashDurationMs", prefs: prefs), value: String(prefs.flashDurationMs), identifier: "number-flashDurationMs", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(booleanRow(localized("autoApproveAllPermissions", prefs: prefs), key: "autoApproveAllPermissions", value: prefs.autoApproveAllPermissions))
   }
 
   private func addAppearanceSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("appearance", prefs: prefs)))
     stack.addArrangedSubview(themeRow(prefs))
-    stack.addArrangedSubview(textRow(label: "Theme variant", value: prefs.themeVariant[prefs.theme] ?? "default", identifier: "theme-variant", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Overrides JSON", value: prefs.themeOverrides[prefs.theme]?.shortDescription ?? "", identifier: "theme-overrides-json", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(infoLabel("Overrides support theme states, miniMode, timings, reactions, hitbox, idleAnimations, and displayHintMap."))
+    stack.addArrangedSubview(textRow(label: localized("themeVariant", prefs: prefs), value: prefs.themeVariant[prefs.theme] ?? "default", identifier: "theme-variant", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("overridesJSON", prefs: prefs), value: prefs.themeOverrides[prefs.theme]?.shortDescription ?? "", identifier: "theme-overrides-json", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(formInfoRow(localized("overridesHelp", prefs: prefs)))
 
-    stack.addArrangedSubview(checkboxRow(title: "Mini mode", state: prefs.miniMode, identifier: nil, action: #selector(toggleMini(_:))))
+    stack.addArrangedSubview(checkboxRow(title: localized("miniMode", prefs: prefs), state: prefs.miniMode, identifier: nil, action: #selector(toggleMini(_:))))
     stack.addArrangedSubview(miniEdgeRow(prefs))
 
     stack.addArrangedSubview(separator())
-    stack.addArrangedSubview(sectionTitle("Session HUD"))
-    stack.addArrangedSubview(booleanRow("Enable Session HUD", key: "sessionHudEnabled", value: prefs.sessionHudEnabled))
-    stack.addArrangedSubview(booleanRow("Show state labels", key: "sessionHudShowStateLabels", value: prefs.sessionHudShowStateLabels))
-    stack.addArrangedSubview(booleanRow("Show elapsed time", key: "sessionHudShowElapsed", value: prefs.sessionHudShowElapsed))
-    stack.addArrangedSubview(booleanRow("Show context usage", key: "sessionHudShowContextUsage", value: prefs.sessionHudShowContextUsage))
-    stack.addArrangedSubview(booleanRow("Cleanup detached sessions", key: "sessionHudCleanupDetached", value: prefs.sessionHudCleanupDetached))
-    stack.addArrangedSubview(booleanRow("Pin Session HUD", key: "sessionHudPinned", value: prefs.sessionHudPinned))
+    stack.addArrangedSubview(sectionTitle(localized("sessionHUD", prefs: prefs)))
+    stack.addArrangedSubview(booleanRow(localized("enableSessionHUD", prefs: prefs), key: "sessionHudEnabled", value: prefs.sessionHudEnabled))
+    stack.addArrangedSubview(booleanRow(localized("showStateLabels", prefs: prefs), key: "sessionHudShowStateLabels", value: prefs.sessionHudShowStateLabels))
+    stack.addArrangedSubview(booleanRow(localized("showElapsedTime", prefs: prefs), key: "sessionHudShowElapsed", value: prefs.sessionHudShowElapsed))
+    stack.addArrangedSubview(booleanRow(localized("showContextUsage", prefs: prefs), key: "sessionHudShowContextUsage", value: prefs.sessionHudShowContextUsage))
+    stack.addArrangedSubview(booleanRow(localized("cleanupDetachedSessions", prefs: prefs), key: "sessionHudCleanupDetached", value: prefs.sessionHudCleanupDetached))
+    stack.addArrangedSubview(booleanRow(localized("pinSessionHUD", prefs: prefs), key: "sessionHudPinned", value: prefs.sessionHudPinned))
   }
 
   private func addAgentsSection(_ prefs: Preferences) {
@@ -229,23 +230,23 @@ final class SettingsWindowController: NSWindowController {
       enabled.state = AgentGate.isAgentEnabled(prefs, agent.id) ? .on : .off
       row.addArrangedSubview(enabled)
 
-      let permissions = NSButton(checkboxWithTitle: "permission bubble", target: self, action: #selector(toggleAgentPermission(_:)))
+      let permissions = NSButton(checkboxWithTitle: localized("permissionBubble", prefs: prefs), target: self, action: #selector(toggleAgentPermission(_:)))
       permissions.identifier = NSUserInterfaceItemIdentifier(agent.id)
       permissions.state = AgentGate.isAgentPermissionsEnabled(prefs, agent.id) ? .on : .off
       permissions.isEnabled = agent.capabilities.permissionApproval
       row.addArrangedSubview(permissions)
 
-      let notifications = NSButton(checkboxWithTitle: "notification hook", target: self, action: #selector(toggleAgentNotification(_:)))
+      let notifications = NSButton(checkboxWithTitle: localized("notificationHook", prefs: prefs), target: self, action: #selector(toggleAgentNotification(_:)))
       notifications.identifier = NSUserInterfaceItemIdentifier(agent.id)
       notifications.state = (prefs.agents[agent.id]?.notificationHookEnabled ?? true) ? .on : .off
       row.addArrangedSubview(notifications)
       stack.addArrangedSubview(row)
 
       let details = [
-        installed ? "installed" : "not installed",
-        agent.capabilities.stateOnly ? "state-only" : "state+permission",
-        agent.capabilities.terminalFocus ? "terminal focus" : "no terminal focus",
-        NativeIntegrationInstaller.supports(agent.id) ? "native installer" : "JS installer"
+        localized(installed ? "installed" : "notInstalled", prefs: prefs),
+        localized(agent.capabilities.stateOnly ? "stateOnly" : "stateAndPermission", prefs: prefs),
+        localized(agent.capabilities.terminalFocus ? "terminalFocus" : "noTerminalFocus", prefs: prefs),
+        localized(NativeIntegrationInstaller.supports(agent.id) ? "nativeInstaller" : "jsInstaller", prefs: prefs)
       ].joined(separator: " / ")
       stack.addArrangedSubview(NSTextField(labelWithString: "  \(agent.id): \(details)"))
 
@@ -259,12 +260,12 @@ final class SettingsWindowController: NSWindowController {
         indent.widthAnchor.constraint(equalToConstant: 18).isActive = true
         actions.addArrangedSubview(indent)
 
-        let install = NSButton(title: installed ? "Repair" : "Install", target: self, action: #selector(installAgentIntegration(_:)))
+        let install = NSButton(title: localized(installed ? "repair" : "install", prefs: prefs), target: self, action: #selector(installAgentIntegration(_:)))
         install.identifier = NSUserInterfaceItemIdentifier(agent.id)
         install.isEnabled = canInstall
         actions.addArrangedSubview(install)
 
-        let uninstall = NSButton(title: "Uninstall", target: self, action: #selector(uninstallAgentIntegration(_:)))
+        let uninstall = NSButton(title: localized("uninstall", prefs: prefs), target: self, action: #selector(uninstallAgentIntegration(_:)))
         uninstall.identifier = NSUserInterfaceItemIdentifier(agent.id)
         uninstall.isEnabled = installed && canUninstall
         actions.addArrangedSubview(uninstall)
@@ -276,68 +277,68 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(agentSubagentRow(agentId: agent.id, prefs: prefs))
       }
       if agent.id == "codex" {
-        stack.addArrangedSubview(textRow(label: "Codex mode", value: prefs.agents[agent.id]?.permissionMode ?? "intercept", identifier: "agent-permissionMode-\(agent.id)", action: #selector(updateTextPreference(_:))))
+        stack.addArrangedSubview(textRow(label: localized("codexMode", prefs: prefs), value: prefs.agents[agent.id]?.permissionMode ?? "intercept", identifier: "agent-permissionMode-\(agent.id)", action: #selector(updateTextPreference(_:))))
       }
     }
   }
 
   private func addIntegrationsSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("integrations", prefs: prefs)))
-    stack.addArrangedSubview(booleanRow("Manage Claude hooks automatically", key: "manageClaudeHooksAutomatically", value: prefs.manageClaudeHooksAutomatically))
-    stack.addArrangedSubview(booleanRow("Auto-start with Claude", key: "autoStartWithClaude", value: prefs.autoStartWithClaude))
+    stack.addArrangedSubview(booleanRow(localized("manageClaudeHooksAutomatically", prefs: prefs), key: "manageClaudeHooksAutomatically", value: prefs.manageClaudeHooksAutomatically))
+    stack.addArrangedSubview(booleanRow(localized("autoStartWithClaude", prefs: prefs), key: "autoStartWithClaude", value: prefs.autoStartWithClaude))
 
-    let bubbles = NSButton(checkboxWithTitle: "Enable permission bubbles", target: self, action: #selector(toggleBubbles(_:)))
+    let bubbles = NSButton(checkboxWithTitle: localized("enablePermissionBubbles", prefs: prefs), target: self, action: #selector(toggleBubbles(_:)))
     bubbles.state = prefs.permissionBubblesEnabled && !prefs.hideBubbles ? .on : .off
     stack.addArrangedSubview(bubbles)
-    stack.addArrangedSubview(textRow(label: "Permission auto-close s", value: String(prefs.permissionBubbleAutoCloseSeconds), identifier: "number-permissionBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Notification auto-close s", value: String(prefs.notificationBubbleAutoCloseSeconds), identifier: "number-notificationBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Update auto-close s", value: String(prefs.updateBubbleAutoCloseSeconds), identifier: "number-updateBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("permissionAutoCloseSeconds", prefs: prefs), value: String(prefs.permissionBubbleAutoCloseSeconds), identifier: "number-permissionBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("notificationAutoCloseSeconds", prefs: prefs), value: String(prefs.notificationBubbleAutoCloseSeconds), identifier: "number-notificationBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("updateAutoCloseSeconds", prefs: prefs), value: String(prefs.updateBubbleAutoCloseSeconds), identifier: "number-updateBubbleAutoCloseSeconds", action: #selector(updateTextPreference(_:))))
 
-    let tray = NSButton(checkboxWithTitle: "Show status menu", target: self, action: #selector(toggleTray(_:)))
+    let tray = NSButton(checkboxWithTitle: localized("showStatusMenu", prefs: prefs), target: self, action: #selector(toggleTray(_:)))
     tray.state = prefs.showTray ? .on : .off
     stack.addArrangedSubview(tray)
 
     stack.addArrangedSubview(separator())
-    stack.addArrangedSubview(sectionTitle("Runtime"))
-    stack.addArrangedSubview(infoLabel("Local hook server: \(localPort().map { "127.0.0.1:\($0)" } ?? "not running")"))
-    stack.addArrangedSubview(infoLabel("Mobile preview: GET /mobile-preview"))
-    stack.addArrangedSubview(infoLabel("Remote SSH status: GET /remote-ssh/status"))
-    stack.addArrangedSubview(infoLabel("Updater: \(UpdaterRuntime.gitModePlan().check.joined(separator: " "))"))
+    stack.addArrangedSubview(sectionTitle(localized("runtime", prefs: prefs)))
+    stack.addArrangedSubview(infoLabel("\(localized("localHookServer", prefs: prefs)): \(localPort().map { "127.0.0.1:\($0)" } ?? localized("notRunning", prefs: prefs))"))
+    stack.addArrangedSubview(infoLabel("\(localized("mobilePreview", prefs: prefs)): GET /mobile-preview"))
+    stack.addArrangedSubview(infoLabel("\(localized("remoteSSHStatus", prefs: prefs)): GET /remote-ssh/status"))
+    stack.addArrangedSubview(infoLabel("\(localized("updater", prefs: prefs)): \(UpdaterRuntime.gitModePlan().check.joined(separator: " "))"))
   }
 
   private func addShortcutsSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("shortcuts", prefs: prefs)))
-    stack.addArrangedSubview(textRow(label: "Toggle pet", value: prefs.shortcuts["togglePet"] ?? "", identifier: "shortcut-togglePet", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Allow", value: prefs.shortcuts["permissionAllow"] ?? "", identifier: "shortcut-permissionAllow", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Deny", value: prefs.shortcuts["permissionDeny"] ?? "", identifier: "shortcut-permissionDeny", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("togglePet", prefs: prefs), value: prefs.shortcuts["togglePet"] ?? "", identifier: "shortcut-togglePet", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("allow", prefs: prefs), value: prefs.shortcuts["permissionAllow"] ?? "", identifier: "shortcut-permissionAllow", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("deny", prefs: prefs), value: prefs.shortcuts["permissionDeny"] ?? "", identifier: "shortcut-permissionDeny", action: #selector(updateTextPreference(_:))))
 
     stack.addArrangedSubview(separator())
-    stack.addArrangedSubview(sectionTitle("Diagnostics"))
+    stack.addArrangedSubview(sectionTitle(localized("diagnostics", prefs: prefs)))
     for diagnostic in ShortcutDiagnostics.validate(prefs.shortcuts) {
       stack.addArrangedSubview(infoLabel("\(diagnostic.status): \(diagnostic.message)"))
     }
 
     stack.addArrangedSubview(separator())
-    stack.addArrangedSubview(sectionTitle("Hardware Buddy"))
-    stack.addArrangedSubview(booleanRow("Enable Hardware Buddy", key: "hardwareBuddy.enabled", value: prefs.hardwareBuddy.enabled))
-    stack.addArrangedSubview(booleanRow("Allow hardware permission replies", key: "hardwareBuddy.permissionsEnabled", value: prefs.hardwareBuddy.permissionsEnabled))
-    stack.addArrangedSubview(booleanRow("Enable quick commands", key: "hardwareBuddy.quickCommandsEnabled", value: prefs.hardwareBuddy.quickCommandsEnabled))
-    stack.addArrangedSubview(textRow(label: "Device", value: prefs.hardwareBuddy.deviceAddress ?? "", identifier: "hardware-device", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Name prefix", value: prefs.hardwareBuddy.namePrefix, identifier: "hardware-prefix", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(sectionTitle(localized("hardwareBuddy", prefs: prefs)))
+    stack.addArrangedSubview(booleanRow(localized("enableHardwareBuddy", prefs: prefs), key: "hardwareBuddy.enabled", value: prefs.hardwareBuddy.enabled))
+    stack.addArrangedSubview(booleanRow(localized("allowHardwarePermissionReplies", prefs: prefs), key: "hardwareBuddy.permissionsEnabled", value: prefs.hardwareBuddy.permissionsEnabled))
+    stack.addArrangedSubview(booleanRow(localized("enableQuickCommands", prefs: prefs), key: "hardwareBuddy.quickCommandsEnabled", value: prefs.hardwareBuddy.quickCommandsEnabled))
+    stack.addArrangedSubview(textRow(label: localized("device", prefs: prefs), value: prefs.hardwareBuddy.deviceAddress ?? "", identifier: "hardware-device", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("namePrefix", prefs: prefs), value: prefs.hardwareBuddy.namePrefix, identifier: "hardware-prefix", action: #selector(updateTextPreference(_:))))
   }
 
   private func addTelegramSection(_ prefs: Preferences) {
-    stack.addArrangedSubview(sectionTitle("Telegram Approval"))
-    stack.addArrangedSubview(checkboxRow(title: "Enable Telegram approval", state: prefs.telegramApproval.enabled, identifier: nil, action: #selector(toggleTelegram(_:))))
-    stack.addArrangedSubview(textRow(label: "Token file", value: prefs.telegramApproval.botTokenFile, identifier: "telegram-token-file", action: #selector(updateTextPreference(_:))))
-    stack.addArrangedSubview(textRow(label: "Chat ID", value: prefs.telegramApproval.chatId, identifier: "telegram-chat-id", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(sectionTitle(localized("telegramApproval", prefs: prefs)))
+    stack.addArrangedSubview(checkboxRow(title: localized("enableTelegramApproval", prefs: prefs), state: prefs.telegramApproval.enabled, identifier: nil, action: #selector(toggleTelegram(_:))))
+    stack.addArrangedSubview(textRow(label: localized("tokenFile", prefs: prefs), value: prefs.telegramApproval.botTokenFile, identifier: "telegram-token-file", action: #selector(updateTextPreference(_:))))
+    stack.addArrangedSubview(textRow(label: localized("chatID", prefs: prefs), value: prefs.telegramApproval.chatId, identifier: "telegram-chat-id", action: #selector(updateTextPreference(_:))))
   }
 
   private func addAboutSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("about", prefs: prefs)))
     stack.addArrangedSubview(infoLabel("Clawd Native"))
-    stack.addArrangedSubview(infoLabel("Project root: \(projectRoot.path)"))
-    stack.addArrangedSubview(infoLabel("Preferences: \(PreferencesStore.defaultURL().path)"))
+    stack.addArrangedSubview(infoLabel("\(localized("projectRoot", prefs: prefs)): \(projectRoot.path)"))
+    stack.addArrangedSubview(infoLabel("\(localized("preferences", prefs: prefs)): \(PreferencesStore.defaultURL().path)"))
 
     let actions = NSStackView()
     actions.orientation = .horizontal
@@ -347,7 +348,7 @@ final class SettingsWindowController: NSWindowController {
     stack.addArrangedSubview(actions)
 
     stack.addArrangedSubview(separator())
-    stack.addArrangedSubview(sectionTitle("Doctor Preview"))
+    stack.addArrangedSubview(sectionTitle(localized("doctorPreview", prefs: prefs)))
     for item in Diagnostics.localReport(
       serverPort: localPort(),
       preferencesURL: PreferencesStore.defaultURL(),
@@ -365,13 +366,13 @@ final class SettingsWindowController: NSWindowController {
     row.alignment = .firstBaseline
     row.spacing = 10
     row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
-    row.addArrangedSubview(fieldLabel("Language"))
+    row.addArrangedSubview(fieldLabel(localized("language", prefs: prefs)))
     let popup = NSPopUpButton()
-    for lang in ["en", "zh", "ko", "ja"] {
-      popup.addItem(withTitle: lang)
+    for (lang, title) in [("en", "English"), ("zh", "简体中文"), ("ko", "한국어"), ("ja", "日本語")] {
+      popup.addItem(withTitle: title)
       popup.lastItem?.representedObject = lang
     }
-    popup.selectItem(withTitle: prefs.lang)
+    selectPopupItem(popup, representedObject: prefs.lang)
     popup.target = self
     popup.action = #selector(changeLanguage(_:))
     row.addArrangedSubview(popup)
@@ -385,7 +386,7 @@ final class SettingsWindowController: NSWindowController {
     row.alignment = .firstBaseline
     row.spacing = 10
     row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
-    row.addArrangedSubview(fieldLabel("Theme"))
+    row.addArrangedSubview(fieldLabel(localized("theme", prefs: prefs)))
     let themePopup = NSPopUpButton()
     for theme in ["clawd", "calico", "cloudling"] {
       themePopup.addItem(withTitle: theme)
@@ -405,13 +406,13 @@ final class SettingsWindowController: NSWindowController {
     row.alignment = .firstBaseline
     row.spacing = 10
     row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
-    row.addArrangedSubview(fieldLabel("Mini edge"))
+    row.addArrangedSubview(fieldLabel(localized("miniEdge", prefs: prefs)))
     let edgePopup = NSPopUpButton()
-    for edge in ["right", "left"] {
-      edgePopup.addItem(withTitle: edge)
+    for (edge, title) in [("right", localized("edgeRight", prefs: prefs)), ("left", localized("edgeLeft", prefs: prefs))] {
+      edgePopup.addItem(withTitle: title)
       edgePopup.lastItem?.representedObject = edge
     }
-    edgePopup.selectItem(withTitle: prefs.miniEdge)
+    selectPopupItem(edgePopup, representedObject: prefs.miniEdge)
     edgePopup.target = self
     edgePopup.action = #selector(changeMiniEdge(_:))
     row.addArrangedSubview(edgePopup)
@@ -420,7 +421,7 @@ final class SettingsWindowController: NSWindowController {
   }
 
   private func agentSubagentRow(agentId: String, prefs: Preferences) -> NSButton {
-    let button = NSButton(checkboxWithTitle: "subagent permissions", target: self, action: #selector(toggleAgentSubagent(_:)))
+    let button = NSButton(checkboxWithTitle: localized("subagentPermissions", prefs: prefs), target: self, action: #selector(toggleAgentSubagent(_:)))
     button.identifier = NSUserInterfaceItemIdentifier(agentId)
     button.state = (prefs.agents[agentId]?.subagentPermissionsEnabled ?? true) ? .on : .off
     return button
@@ -431,21 +432,21 @@ final class SettingsWindowController: NSWindowController {
     headingRow.orientation = .horizontal
     headingRow.spacing = 8
     headingRow.addArrangedSubview(sectionTitle("Remote SSH"))
-    let add = NSButton(title: "Add Profile", target: self, action: #selector(addRemoteProfile))
+    let add = NSButton(title: localized("addProfile", prefs: prefs), target: self, action: #selector(addRemoteProfile))
     headingRow.addArrangedSubview(add)
     stack.addArrangedSubview(headingRow)
 
     if prefs.remoteSshProfiles.isEmpty {
-      stack.addArrangedSubview(NSTextField(labelWithString: "No Remote SSH profiles configured."))
+      stack.addArrangedSubview(infoLabel(localized("noRemoteProfiles", prefs: prefs)))
       return
     }
 
     for profile in prefs.remoteSshProfiles {
-      stack.addArrangedSubview(remoteProfileView(profile))
+      stack.addArrangedSubview(remoteProfileView(profile, prefs: prefs))
     }
   }
 
-  private func remoteProfileView(_ profile: RemoteSSHProfile) -> NSView {
+  private func remoteProfileView(_ profile: RemoteSSHProfile, prefs: Preferences) -> NSView {
     let container = NSStackView()
     container.orientation = .vertical
     container.spacing = 6
@@ -456,47 +457,47 @@ final class SettingsWindowController: NSWindowController {
     title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
     container.addArrangedSubview(title)
 
-    let statusLabel = NSTextField(labelWithString: "Status: \(status.state) - \(status.message)")
+    let statusLabel = NSTextField(labelWithString: "\(localized("status", prefs: prefs)): \(status.state) - \(status.message)")
     statusLabel.lineBreakMode = .byTruncatingTail
     container.addArrangedSubview(statusLabel)
 
     let flags = NSStackView()
     flags.orientation = .horizontal
     flags.spacing = 10
-    flags.addArrangedSubview(remoteCheck(profile: profile, field: "enabled", title: "Enabled", value: profile.enabled))
-    flags.addArrangedSubview(remoteCheck(profile: profile, field: "connectOnLaunch", title: "Connect on launch", value: profile.connectOnLaunch))
-    flags.addArrangedSubview(remoteCheck(profile: profile, field: "autoStartCodexMonitor", title: "Codex monitor", value: profile.autoStartCodexMonitor))
+    flags.addArrangedSubview(remoteCheck(profile: profile, field: "enabled", title: localized("enabled", prefs: prefs), value: profile.enabled))
+    flags.addArrangedSubview(remoteCheck(profile: profile, field: "connectOnLaunch", title: localized("connectOnLaunch", prefs: prefs), value: profile.connectOnLaunch))
+    flags.addArrangedSubview(remoteCheck(profile: profile, field: "autoStartCodexMonitor", title: localized("codexMonitor", prefs: prefs), value: profile.autoStartCodexMonitor))
     container.addArrangedSubview(flags)
 
-    container.addArrangedSubview(remoteTextRow(profile: profile, field: "label", label: "Label", value: profile.label))
-    container.addArrangedSubview(remoteTextRow(profile: profile, field: "host", label: "Host", value: profile.host))
-    container.addArrangedSubview(remoteTextRow(profile: profile, field: "user", label: "User", value: profile.user))
-    container.addArrangedSubview(remoteTextRow(profile: profile, field: "port", label: "SSH port", value: profile.port.map(String.init) ?? ""))
-    container.addArrangedSubview(remoteTextRow(profile: profile, field: "identityFile", label: "Identity file", value: profile.identityFile ?? ""))
-    container.addArrangedSubview(remoteTextRow(profile: profile, field: "remoteForwardPort", label: "Forward port", value: String(profile.remoteForwardPort)))
-    container.addArrangedSubview(remoteTextRow(profile: profile, field: "hostPrefix", label: "Host prefix", value: profile.hostPrefix ?? ""))
+    container.addArrangedSubview(remoteTextRow(profile: profile, field: "label", label: localized("label", prefs: prefs), value: profile.label))
+    container.addArrangedSubview(remoteTextRow(profile: profile, field: "host", label: localized("host", prefs: prefs), value: profile.host))
+    container.addArrangedSubview(remoteTextRow(profile: profile, field: "user", label: localized("user", prefs: prefs), value: profile.user))
+    container.addArrangedSubview(remoteTextRow(profile: profile, field: "port", label: localized("sshPort", prefs: prefs), value: profile.port.map(String.init) ?? ""))
+    container.addArrangedSubview(remoteTextRow(profile: profile, field: "identityFile", label: localized("identityFile", prefs: prefs), value: profile.identityFile ?? ""))
+    container.addArrangedSubview(remoteTextRow(profile: profile, field: "remoteForwardPort", label: localized("forwardPort", prefs: prefs), value: String(profile.remoteForwardPort)))
+    container.addArrangedSubview(remoteTextRow(profile: profile, field: "hostPrefix", label: localized("hostPrefix", prefs: prefs), value: profile.hostPrefix ?? ""))
     if let node = profile.detectedRemoteNodeBin, let version = profile.detectedRemoteNodeVersion {
-      container.addArrangedSubview(infoLabel("Remote Node: \(node) \(version)"))
+      container.addArrangedSubview(infoLabel("\(localized("remoteNode", prefs: prefs)): \(node) \(version)"))
     }
     if let lastDeployedAt = profile.lastDeployedAt {
-      container.addArrangedSubview(infoLabel("Last deployed: \(Date(timeIntervalSince1970: lastDeployedAt / 1000).formatted())"))
+      container.addArrangedSubview(infoLabel("\(localized("lastDeployed", prefs: prefs)): \(Date(timeIntervalSince1970: lastDeployedAt / 1000).formatted())"))
     }
 
     let primaryActions = NSStackView()
     primaryActions.orientation = .horizontal
     primaryActions.spacing = 8
-    primaryActions.addArrangedSubview(remoteButton("Save", id: profile.id, action: #selector(saveRemoteProfile(_:))))
-    primaryActions.addArrangedSubview(remoteButton("Connect", id: profile.id, action: #selector(connectRemoteProfile(_:))))
-    primaryActions.addArrangedSubview(remoteButton("Disconnect", id: profile.id, action: #selector(disconnectRemoteProfile(_:))))
-    primaryActions.addArrangedSubview(remoteButton("Probe", id: profile.id, action: #selector(probeRemoteProfile(_:))))
+    primaryActions.addArrangedSubview(remoteButton(localized("save", prefs: prefs), id: profile.id, action: #selector(saveRemoteProfile(_:))))
+    primaryActions.addArrangedSubview(remoteButton(localized("connect", prefs: prefs), id: profile.id, action: #selector(connectRemoteProfile(_:))))
+    primaryActions.addArrangedSubview(remoteButton(localized("disconnect", prefs: prefs), id: profile.id, action: #selector(disconnectRemoteProfile(_:))))
+    primaryActions.addArrangedSubview(remoteButton(localized("probe", prefs: prefs), id: profile.id, action: #selector(probeRemoteProfile(_:))))
     container.addArrangedSubview(primaryActions)
 
     let secondaryActions = NSStackView()
     secondaryActions.orientation = .horizontal
     secondaryActions.spacing = 8
-    secondaryActions.addArrangedSubview(remoteButton("Deploy / Repair Hooks", id: profile.id, action: #selector(deployRemoteProfile(_:))))
-    secondaryActions.addArrangedSubview(remoteButton("Open Terminal", id: profile.id, action: #selector(openRemoteTerminal(_:))))
-    secondaryActions.addArrangedSubview(remoteButton("Delete", id: profile.id, action: #selector(deleteRemoteProfile(_:))))
+    secondaryActions.addArrangedSubview(remoteButton(localized("deployRepairHooks", prefs: prefs), id: profile.id, action: #selector(deployRemoteProfile(_:))))
+    secondaryActions.addArrangedSubview(remoteButton(localized("openTerminal", prefs: prefs), id: profile.id, action: #selector(openRemoteTerminal(_:))))
+    secondaryActions.addArrangedSubview(remoteButton(localized("delete", prefs: prefs), id: profile.id, action: #selector(deleteRemoteProfile(_:))))
     container.addArrangedSubview(secondaryActions)
     container.addArrangedSubview(separator())
     return container
@@ -536,12 +537,13 @@ final class SettingsWindowController: NSWindowController {
   }
 
   @objc private func addRemoteProfile() {
+    let prefs = preferencesStore.get()
     let now = Int(Date().timeIntervalSince1970 * 1000)
-    let used = Set(preferencesStore.get().remoteSshProfiles.map(\.remoteForwardPort))
+    let used = Set(prefs.remoteSshProfiles.map(\.remoteForwardPort))
     let forwardPort = RemoteSSHProfileValidator.remoteForwardPorts.sorted().first { !used.contains($0) } ?? 23333
     let profile = RemoteSSHProfile(
       id: "remote-\(now)",
-      label: "Remote SSH",
+      label: localized("remoteSSHProfile", prefs: prefs),
       host: "localhost",
       remoteForwardPort: forwardPort
     )
@@ -575,7 +577,7 @@ final class SettingsWindowController: NSWindowController {
     profile.autoStartCodexMonitor = remoteBool(id, "autoStartCodexMonitor")
 
     if case .failure(let error) = RemoteSSHProfileValidator.validate(profile) {
-      showAlert("Remote SSH profile is invalid: \(error.message)")
+      showAlert("\(localized("remoteProfileInvalid", prefs: prefs)): \(error.message)")
       return
     }
     _ = try? preferencesStore.update { prefs in
@@ -605,7 +607,7 @@ final class SettingsWindowController: NSWindowController {
   @objc private func connectRemoteProfile(_ sender: NSButton) {
     guard let profile = profile(id: sender.identifier?.rawValue) else { return }
     guard let port = localPort() else {
-      showAlert("Local hook server is not running.")
+      showAlert(localized("localHookServerNotRunning", prefs: preferencesStore.get()))
       return
     }
     DispatchQueue.global(qos: .utility).async { [remoteSSHRuntime] in
@@ -631,7 +633,8 @@ final class SettingsWindowController: NSWindowController {
     DispatchQueue.global(qos: .utility).async { [weak self, remoteSSHRuntime] in
       let status = remoteSSHRuntime.probe(profile: profile)
       Task { @MainActor in
-        self?.showAlert("Probe \(status.state): \(status.message)")
+        guard let self else { return }
+        self.showAlert("\(self.localized("probe", prefs: self.preferencesStore.get())) \(status.state): \(status.message)")
       }
     }
   }
@@ -652,12 +655,14 @@ final class SettingsWindowController: NSWindowController {
           }
         }
       }
-      let warning = result.warnings.isEmpty ? "" : "\nWarnings:\n\(result.warnings.joined(separator: "\n"))"
-      let message = result.ok
-        ? "\(result.message)\(warning)"
-        : "Deploy failed at \(result.step): \(result.message)"
       Task { @MainActor in
-        self?.showAlert(message)
+        guard let self else { return }
+        let prefs = self.preferencesStore.get()
+        let warning = result.warnings.isEmpty ? "" : "\n\(self.localized("warnings", prefs: prefs)):\n\(result.warnings.joined(separator: "\n"))"
+        let message = result.ok
+          ? "\(result.message)\(warning)"
+          : "\(self.localized("deployFailedAt", prefs: prefs)) \(result.step): \(result.message)"
+        self.showAlert(message)
       }
     }
   }
@@ -672,7 +677,7 @@ final class SettingsWindowController: NSWindowController {
     do {
       try process.run()
     } catch {
-      showAlert("Could not open Terminal: \(error.localizedDescription)")
+      showAlert("\(localized("couldNotOpenTerminal", prefs: preferencesStore.get())): \(error.localizedDescription)")
     }
   }
 
@@ -734,7 +739,7 @@ final class SettingsWindowController: NSWindowController {
                   let value = try? JSONDecoder().decode(JSONValue.self, from: data) {
           prefs.themeOverrides[prefs.theme] = value
         } else {
-          showAlert("Theme overrides must be valid JSON.")
+          showAlert(localized("themeOverridesInvalid", prefs: prefs))
         }
       } else if id.hasPrefix("shortcut-") {
         let key = String(id.dropFirst("shortcut-".count))
@@ -762,11 +767,12 @@ final class SettingsWindowController: NSWindowController {
     guard let key = sender.identifier?.rawValue else { return }
     let enabled = sender.state == .on
     if key == "autoApproveAllPermissions", enabled {
+      let prefs = preferencesStore.get()
       let alert = NSAlert()
-      alert.messageText = "Enable auto-approve all permissions?"
-      alert.informativeText = "All agent permission requests will be approved without showing a bubble until Clawd Native quits."
-      alert.addButton(withTitle: "Enable")
-      alert.addButton(withTitle: "Cancel")
+      alert.messageText = localized("autoApproveConfirmTitle", prefs: prefs)
+      alert.informativeText = localized("autoApproveConfirmMessage", prefs: prefs)
+      alert.addButton(withTitle: localized("enable", prefs: prefs))
+      alert.addButton(withTitle: localized("cancel", prefs: prefs))
       guard alert.runModal() == .alertFirstButtonReturn else {
         sender.state = .off
         return
@@ -873,7 +879,8 @@ final class SettingsWindowController: NSWindowController {
       }
       Task { @MainActor in
         sender.isEnabled = true
-        self?.showAlert("Install \(agentId): \(result.status)\n\(result.output)")
+        guard let self else { return }
+        self.showAlert("\(self.localized("install", prefs: self.preferencesStore.get())) \(agentId): \(result.status)\n\(result.output)")
       }
     }
   }
@@ -898,7 +905,8 @@ final class SettingsWindowController: NSWindowController {
           self?.agentCleanupHandler(agentId)
         }
         sender.isEnabled = true
-        self?.showAlert("Uninstall \(agentId): \(result.status)\n\(result.output)")
+        guard let self else { return }
+        self.showAlert("\(self.localized("uninstall", prefs: self.preferencesStore.get())) \(agentId): \(result.status)\n\(result.output)")
       }
     }
   }
@@ -1027,6 +1035,32 @@ final class SettingsWindowController: NSWindowController {
     return label
   }
 
+  private func formInfoRow(_ text: String) -> NSView {
+    let row = NSStackView()
+    row.orientation = .horizontal
+    row.alignment = .top
+    row.spacing = 10
+    row.widthAnchor.constraint(equalToConstant: Self.rowWidth).isActive = true
+
+    let labelSpacer = NSView()
+    labelSpacer.widthAnchor.constraint(equalToConstant: Self.labelWidth).isActive = true
+    row.addArrangedSubview(labelSpacer)
+
+    let label = infoLabel(text)
+    label.textColor = .secondaryLabelColor
+    label.widthAnchor.constraint(lessThanOrEqualToConstant: Self.fieldWidth).isActive = true
+    row.addArrangedSubview(label)
+    row.addArrangedSubview(spacer())
+    return row
+  }
+
+  private func selectPopupItem(_ popup: NSPopUpButton, representedObject value: String) {
+    for item in popup.itemArray where item.representedObject as? String == value {
+      popup.select(item)
+      return
+    }
+  }
+
   private func spacer() -> NSView {
     let view = NSView()
     view.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1052,7 +1086,8 @@ final class SettingsWindowController: NSWindowController {
   }
 
   @objc private func showAbout() {
-    showAlert("Clawd Native\nSwift/AppKit runtime for Clawd on Desk.\nProject: \(projectRoot.path)")
+    let prefs = preferencesStore.get()
+    showAlert("Clawd Native\n\(localized("aboutNativeRuntime", prefs: prefs))\n\(localized("projectRoot", prefs: prefs)): \(projectRoot.path)")
   }
 
   private func localized(_ key: String, prefs: Preferences) -> String {
@@ -1062,6 +1097,7 @@ final class SettingsWindowController: NSWindowController {
 
   private static let localizedStrings: [String: [String: String]] = [
     "en": [
+      "settingsTitle": "Clawd Settings",
       "general": "General",
       "appearance": "Appearance",
       "agents": "Agents",
@@ -1070,18 +1106,237 @@ final class SettingsWindowController: NSWindowController {
       "remote": "Remote",
       "telegram": "Telegram",
       "about": "About",
-      "doctor": "Doctor"
+      "doctor": "Doctor",
+      "language": "Language",
+      "showDock": "Show Dock icon",
+      "openAtLogin": "Open at login",
+      "bubbleFollowPet": "Bubble follows pet",
+      "lowPowerIdle": "Low power idle",
+      "keepAwakeWhileWorking": "Keep awake while working",
+      "allowEdgePinning": "Allow edge pinning",
+      "keepSizeAcrossDisplays": "Keep size across displays",
+      "enableMobilePreview": "Enable mobile preview",
+      "muteSounds": "Mute sounds",
+      "soundVolume": "Sound volume",
+      "flashOnComplete": "Flash on complete",
+      "flashIntervalMs": "Flash interval ms",
+      "flashDurationMs": "Flash duration ms",
+      "autoApproveAllPermissions": "Auto-approve all permissions",
+      "theme": "Theme",
+      "themeVariant": "Theme variant",
+      "overridesJSON": "Overrides JSON",
+      "overridesHelp": "Overrides support theme states, miniMode, timings, reactions, hitbox, idleAnimations, and displayHintMap.",
+      "miniMode": "Mini mode",
+      "miniEdge": "Mini edge",
+      "edgeRight": "right",
+      "edgeLeft": "left",
+      "sessionHUD": "Session HUD",
+      "enableSessionHUD": "Enable Session HUD",
+      "showStateLabels": "Show state labels",
+      "showElapsedTime": "Show elapsed time",
+      "showContextUsage": "Show context usage",
+      "cleanupDetachedSessions": "Cleanup detached sessions",
+      "pinSessionHUD": "Pin Session HUD",
+      "permissionBubble": "permission bubble",
+      "notificationHook": "notification hook",
+      "installed": "installed",
+      "notInstalled": "not installed",
+      "stateOnly": "state-only",
+      "stateAndPermission": "state+permission",
+      "terminalFocus": "terminal focus",
+      "noTerminalFocus": "no terminal focus",
+      "nativeInstaller": "native installer",
+      "jsInstaller": "JS installer",
+      "repair": "Repair",
+      "install": "Install",
+      "uninstall": "Uninstall",
+      "codexMode": "Codex mode",
+      "subagentPermissions": "subagent permissions",
+      "manageClaudeHooksAutomatically": "Manage Claude hooks automatically",
+      "autoStartWithClaude": "Auto-start with Claude",
+      "enablePermissionBubbles": "Enable permission bubbles",
+      "permissionAutoCloseSeconds": "Permission auto-close s",
+      "notificationAutoCloseSeconds": "Notification auto-close s",
+      "updateAutoCloseSeconds": "Update auto-close s",
+      "showStatusMenu": "Show status menu",
+      "runtime": "Runtime",
+      "localHookServer": "Local hook server",
+      "notRunning": "not running",
+      "mobilePreview": "Mobile preview",
+      "remoteSSHStatus": "Remote SSH status",
+      "updater": "Updater",
+      "togglePet": "Toggle pet",
+      "allow": "Allow",
+      "deny": "Deny",
+      "diagnostics": "Diagnostics",
+      "hardwareBuddy": "Hardware Buddy",
+      "enableHardwareBuddy": "Enable Hardware Buddy",
+      "allowHardwarePermissionReplies": "Allow hardware permission replies",
+      "enableQuickCommands": "Enable quick commands",
+      "device": "Device",
+      "namePrefix": "Name prefix",
+      "telegramApproval": "Telegram Approval",
+      "enableTelegramApproval": "Enable Telegram approval",
+      "tokenFile": "Token file",
+      "chatID": "Chat ID",
+      "projectRoot": "Project root",
+      "preferences": "Preferences",
+      "doctorPreview": "Doctor Preview",
+      "addProfile": "Add Profile",
+      "noRemoteProfiles": "No Remote SSH profiles configured.",
+      "status": "Status",
+      "enabled": "Enabled",
+      "connectOnLaunch": "Connect on launch",
+      "codexMonitor": "Codex monitor",
+      "label": "Label",
+      "host": "Host",
+      "user": "User",
+      "sshPort": "SSH port",
+      "identityFile": "Identity file",
+      "forwardPort": "Forward port",
+      "hostPrefix": "Host prefix",
+      "remoteNode": "Remote Node",
+      "lastDeployed": "Last deployed",
+      "remoteSSHProfile": "Remote SSH",
+      "remoteProfileInvalid": "Remote SSH profile is invalid",
+      "save": "Save",
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "probe": "Probe",
+      "deployRepairHooks": "Deploy / Repair Hooks",
+      "openTerminal": "Open Terminal",
+      "delete": "Delete",
+      "localHookServerNotRunning": "Local hook server is not running.",
+      "warnings": "Warnings",
+      "deployFailedAt": "Deploy failed at",
+      "couldNotOpenTerminal": "Could not open Terminal",
+      "themeOverridesInvalid": "Theme overrides must be valid JSON.",
+      "autoApproveConfirmTitle": "Enable auto-approve all permissions?",
+      "autoApproveConfirmMessage": "All agent permission requests will be approved without showing a bubble until Clawd Native quits.",
+      "enable": "Enable",
+      "cancel": "Cancel",
+      "aboutNativeRuntime": "Swift/AppKit runtime for Clawd on Desk."
     ],
     "zh": [
+      "settingsTitle": "Clawd 设置",
       "general": "通用",
       "appearance": "外观",
-      "agents": "Agent",
+      "agents": "智能体",
       "integrations": "集成",
       "shortcuts": "快捷键",
       "remote": "远程",
       "telegram": "Telegram",
       "about": "关于",
-      "doctor": "诊断"
+      "doctor": "诊断",
+      "language": "语言",
+      "showDock": "显示 Dock 图标",
+      "openAtLogin": "登录时启动",
+      "bubbleFollowPet": "气泡跟随桌宠",
+      "lowPowerIdle": "低功耗空闲",
+      "keepAwakeWhileWorking": "工作时保持唤醒",
+      "allowEdgePinning": "允许贴边",
+      "keepSizeAcrossDisplays": "跨显示器保持大小",
+      "enableMobilePreview": "启用移动预览",
+      "muteSounds": "静音",
+      "soundVolume": "音量",
+      "flashOnComplete": "完成时闪烁",
+      "flashIntervalMs": "闪烁间隔 ms",
+      "flashDurationMs": "闪烁时长 ms",
+      "autoApproveAllPermissions": "自动批准所有权限",
+      "theme": "主题",
+      "themeVariant": "主题变体",
+      "overridesJSON": "覆盖 JSON",
+      "overridesHelp": "覆盖项支持主题状态、miniMode、timings、reactions、hitbox、idleAnimations 和 displayHintMap。",
+      "miniMode": "迷你模式",
+      "miniEdge": "迷你停靠边缘",
+      "edgeRight": "右侧",
+      "edgeLeft": "左侧",
+      "sessionHUD": "会话 HUD",
+      "enableSessionHUD": "启用会话 HUD",
+      "showStateLabels": "显示状态标签",
+      "showElapsedTime": "显示已用时间",
+      "showContextUsage": "显示上下文用量",
+      "cleanupDetachedSessions": "清理已断开的会话",
+      "pinSessionHUD": "固定会话 HUD",
+      "permissionBubble": "权限气泡",
+      "notificationHook": "通知 hook",
+      "installed": "已安装",
+      "notInstalled": "未安装",
+      "stateOnly": "仅状态",
+      "stateAndPermission": "状态 + 权限",
+      "terminalFocus": "支持终端聚焦",
+      "noTerminalFocus": "不支持终端聚焦",
+      "nativeInstaller": "原生安装器",
+      "jsInstaller": "JS 安装器",
+      "repair": "修复",
+      "install": "安装",
+      "uninstall": "卸载",
+      "codexMode": "Codex 模式",
+      "subagentPermissions": "子智能体权限",
+      "manageClaudeHooksAutomatically": "自动管理 Claude hooks",
+      "autoStartWithClaude": "随 Claude 自动启动",
+      "enablePermissionBubbles": "启用权限气泡",
+      "permissionAutoCloseSeconds": "权限气泡自动关闭 s",
+      "notificationAutoCloseSeconds": "通知气泡自动关闭 s",
+      "updateAutoCloseSeconds": "更新气泡自动关闭 s",
+      "showStatusMenu": "显示状态菜单",
+      "runtime": "运行时",
+      "localHookServer": "本地 hook 服务",
+      "notRunning": "未运行",
+      "mobilePreview": "移动预览",
+      "remoteSSHStatus": "Remote SSH 状态",
+      "updater": "更新器",
+      "togglePet": "显示/隐藏桌宠",
+      "allow": "允许",
+      "deny": "拒绝",
+      "diagnostics": "诊断",
+      "hardwareBuddy": "Hardware Buddy",
+      "enableHardwareBuddy": "启用 Hardware Buddy",
+      "allowHardwarePermissionReplies": "允许硬件回复权限",
+      "enableQuickCommands": "启用快捷命令",
+      "device": "设备",
+      "namePrefix": "名称前缀",
+      "telegramApproval": "Telegram 审批",
+      "enableTelegramApproval": "启用 Telegram 审批",
+      "tokenFile": "Token 文件",
+      "chatID": "Chat ID",
+      "projectRoot": "项目根目录",
+      "preferences": "偏好文件",
+      "doctorPreview": "诊断预览",
+      "addProfile": "添加配置",
+      "noRemoteProfiles": "还没有配置 Remote SSH。",
+      "status": "状态",
+      "enabled": "启用",
+      "connectOnLaunch": "启动时连接",
+      "codexMonitor": "Codex 监控",
+      "label": "名称",
+      "host": "主机",
+      "user": "用户",
+      "sshPort": "SSH 端口",
+      "identityFile": "密钥文件",
+      "forwardPort": "转发端口",
+      "hostPrefix": "主机前缀",
+      "remoteNode": "远端 Node",
+      "lastDeployed": "上次部署",
+      "remoteSSHProfile": "Remote SSH",
+      "remoteProfileInvalid": "Remote SSH 配置无效",
+      "save": "保存",
+      "connect": "连接",
+      "disconnect": "断开",
+      "probe": "探测",
+      "deployRepairHooks": "部署 / 修复 Hooks",
+      "openTerminal": "打开终端",
+      "delete": "删除",
+      "localHookServerNotRunning": "本地 hook 服务未运行。",
+      "warnings": "警告",
+      "deployFailedAt": "部署失败于",
+      "couldNotOpenTerminal": "无法打开终端",
+      "themeOverridesInvalid": "主题覆盖必须是有效 JSON。",
+      "autoApproveConfirmTitle": "启用自动批准所有权限？",
+      "autoApproveConfirmMessage": "Clawd Native 退出前，所有智能体权限请求都会直接批准，不再显示气泡。",
+      "enable": "启用",
+      "cancel": "取消",
+      "aboutNativeRuntime": "Clawd on Desk 的 Swift/AppKit 运行时。"
     ],
     "ko": [
       "general": "일반",
