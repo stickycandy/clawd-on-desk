@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  applyFixedDesktopCollectionBehavior: defaultApplyFixedDesktopCollectionBehavior,
   applyStationaryCollectionBehavior: defaultApplyStationaryCollectionBehavior,
 } = require("./mac-window");
 
@@ -34,6 +35,8 @@ function createTopmostRuntime(options = {}) {
   const isMiniTransitioning = options.isMiniTransitioning || (() => false);
   const applyStationaryCollectionBehavior = options.applyStationaryCollectionBehavior
     || defaultApplyStationaryCollectionBehavior;
+  const applyFixedDesktopCollectionBehavior = options.applyFixedDesktopCollectionBehavior
+    || defaultApplyFixedDesktopCollectionBehavior;
   const keepOutOfTaskbar = options.keepOutOfTaskbar || (() => {});
   const setForceEyeResend = options.setForceEyeResend || (() => {});
   const applyPetWindowPosition = options.applyPetWindowPosition || (() => {});
@@ -61,7 +64,19 @@ function createTopmostRuntime(options = {}) {
 
   function reapplyMacVisibility() {
     if (!isMac) return;
-    const apply = (win) => {
+    const applyFixedDesktop = (win) => {
+      if (!isLiveWindow(win)) return;
+      const deferUntil = Number(win.__clawdMacDeferredVisibilityUntil) || 0;
+      if (deferUntil > Date.now()) return;
+      if (deferUntil) delete win.__clawdMacDeferredVisibilityUntil;
+      win.setAlwaysOnTop(true, MAC_TOPMOST_LEVEL);
+      if (typeof win.setVisibleOnAllWorkspaces === "function") {
+        win.setVisibleOnAllWorkspaces(false);
+      }
+      applyFixedDesktopCollectionBehavior(win);
+    };
+
+    const applyFloating = (win) => {
       if (!isLiveWindow(win)) return;
       const deferUntil = Number(win.__clawdMacDeferredVisibilityUntil) || 0;
       if (deferUntil > Date.now()) return;
@@ -78,14 +93,14 @@ function createTopmostRuntime(options = {}) {
       }
     };
 
-    apply(getWin());
-    apply(getHitWin());
+    applyFixedDesktop(getWin());
+    applyFixedDesktop(getHitWin());
+    applyFixedDesktop(getUpdateBubbleWindow());
+    applyFixedDesktop(getSessionHudWindow());
     for (const perm of getPendingPermissions()) {
-      apply(perm && perm.bubble);
+      applyFloating(perm && perm.bubble);
     }
-    apply(getUpdateBubbleWindow());
-    apply(getSessionHudWindow());
-    apply(getContextMenuOwner());
+    applyFloating(getContextMenuOwner());
   }
 
   function isNearWorkAreaEdge(bounds, tolerance = 2) {

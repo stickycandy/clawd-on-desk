@@ -45,7 +45,7 @@ final class PetWindowController: NSWindowController {
     window.isOpaque = false
     window.backgroundColor = .clear
     window.level = .floating
-    window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+    window.collectionBehavior = [.ignoresCycle, .fullScreenDisallowsTiling]
     window.ignoresMouseEvents = false
     window.hasShadow = false
     window.isMovableByWindowBackground = false

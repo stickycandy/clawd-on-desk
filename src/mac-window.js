@@ -34,6 +34,7 @@ let selWindowNumber = null;
 let selNumberWithInt = null;
 let selArrayWithObject = null;
 let warnedApplyFailure = false;
+let warnedFixedDesktopFailure = false;
 let warnedSkyLightFailure = false;
 let skyLight = null;
 
@@ -190,6 +191,56 @@ function applyStationaryCollectionBehavior(browserWindow) {
   }
 }
 
+function applyFixedDesktopCollectionBehavior(browserWindow) {
+  if (!isMac || !browserWindow || browserWindow.isDestroyed()) return false;
+
+  try {
+    const { msgPtr, msgULong, msgVoidULong, msgVoidLong, msgVoidBool } = initObjc();
+    const nsView = nativeHandleToPointer(browserWindow.getNativeWindowHandle());
+    if (!nsView) return false;
+
+    const nsWindow = msgPtr(nsView, selWindow);
+    if (!nsWindow) return false;
+
+    const current = Number(msgULong(nsWindow, selCollectionBehavior)) || 0;
+    const clearMask =
+      NSWindowCollectionBehaviorCanJoinAllSpaces |
+      NSWindowCollectionBehaviorMoveToActiveSpace |
+      NSWindowCollectionBehaviorManaged |
+      NSWindowCollectionBehaviorTransient |
+      NSWindowCollectionBehaviorStationary |
+      NSWindowCollectionBehaviorParticipatesInCycle |
+      NSWindowCollectionBehaviorFullScreenPrimary |
+      NSWindowCollectionBehaviorFullScreenAuxiliary |
+      NSWindowCollectionBehaviorFullScreenNone |
+      NSWindowCollectionBehaviorFullScreenAllowsTiling |
+      NSWindowCollectionBehaviorPrimary |
+      NSWindowCollectionBehaviorAuxiliary |
+      NSWindowCollectionBehaviorCanJoinAllApplications;
+    const setMask =
+      NSWindowCollectionBehaviorIgnoresCycle |
+      NSWindowCollectionBehaviorFullScreenDisallowsTiling;
+    const next = (current & ~clearMask) | setMask;
+
+    if (next !== current) {
+      msgVoidULong(nsWindow, selSetCollectionBehavior, next);
+    }
+    msgVoidBool(nsWindow, selSetCanHide, false);
+    msgVoidBool(nsWindow, selSetHidesOnDeactivate, false);
+    msgVoidBool(nsWindow, selSetMovable, false);
+    msgVoidLong(nsWindow, selSetAnimationBehavior, NSWindowAnimationBehaviorNone);
+    msgVoidLong(nsWindow, selSetLevel, CGAssistiveTechHighWindowLevel);
+    return true;
+  } catch (err) {
+    if (!warnedFixedDesktopFailure) {
+      console.warn("Clawd: failed to apply macOS fixed-desktop window behavior:", err.message);
+      warnedFixedDesktopFailure = true;
+    }
+    return false;
+  }
+}
+
 module.exports = {
+  applyFixedDesktopCollectionBehavior,
   applyStationaryCollectionBehavior,
 };

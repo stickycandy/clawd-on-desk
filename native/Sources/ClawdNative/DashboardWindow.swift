@@ -210,30 +210,67 @@ final class DashboardWindowController: NSWindowController {
   }
 
   private func addChip(_ text: String, to stack: NSStackView) {
-    let chip = NSTextField(labelWithString: text)
-    chip.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
-    chip.textColor = .secondaryLabelColor
-    chip.alignment = .center
-    chip.wantsLayer = true
-    chip.layer?.cornerRadius = 5
-    chip.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.18).cgColor
-    chip.setContentHuggingPriority(.required, for: .horizontal)
-    chip.heightAnchor.constraint(equalToConstant: 22).isActive = true
-    chip.widthAnchor.constraint(greaterThanOrEqualToConstant: 42).isActive = true
-    stack.addArrangedSubview(chip)
+    stack.addArrangedSubview(
+      pillView(
+        text,
+        font: NSFont.systemFont(ofSize: 10.5, weight: .medium),
+        textColor: .secondaryLabelColor,
+        fillColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.18),
+        minWidth: 42,
+        height: 22,
+        horizontalPadding: 9
+      )
+    )
   }
 
-  private func statusPill(_ badge: String) -> NSTextField {
-    let label = NSTextField(labelWithString: localizedBadge(badge))
-    label.font = NSFont.systemFont(ofSize: 10.5, weight: .bold)
-    label.textColor = .white
+  private func statusPill(_ badge: String) -> NSView {
+    pillView(
+      localizedBadge(badge),
+      font: NSFont.systemFont(ofSize: 10.5, weight: .bold),
+      textColor: .white,
+      fillColor: badgeColor(badge),
+      minWidth: 54,
+      height: 22,
+      horizontalPadding: 12
+    )
+  }
+
+  private func pillView(
+    _ text: String,
+    font: NSFont,
+    textColor: NSColor,
+    fillColor: NSColor,
+    minWidth: CGFloat,
+    height: CGFloat,
+    horizontalPadding: CGFloat
+  ) -> NSView {
+    let container = NSView()
+    container.translatesAutoresizingMaskIntoConstraints = false
+    container.wantsLayer = true
+    container.layer?.cornerRadius = height / 2
+    container.layer?.backgroundColor = fillColor.cgColor
+    container.setContentHuggingPriority(.required, for: .horizontal)
+    container.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+    let label = NSTextField(labelWithString: text)
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = font
+    label.textColor = textColor
     label.alignment = .center
-    label.wantsLayer = true
-    label.layer?.cornerRadius = 5
-    label.layer?.backgroundColor = badgeColor(badge).cgColor
-    label.widthAnchor.constraint(greaterThanOrEqualToConstant: 54).isActive = true
-    label.heightAnchor.constraint(equalToConstant: 22).isActive = true
-    return label
+    label.lineBreakMode = .byTruncatingTail
+    label.maximumNumberOfLines = 1
+    label.setContentHuggingPriority(.required, for: .horizontal)
+    label.setContentCompressionResistancePriority(.required, for: .horizontal)
+    container.addSubview(label)
+
+    NSLayoutConstraint.activate([
+      container.heightAnchor.constraint(equalToConstant: height),
+      container.widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth),
+      label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: horizontalPadding),
+      label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -horizontalPadding),
+      label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+    ])
+    return container
   }
 
   private func titleLabel(_ text: String, size: CGFloat, weight: NSFont.Weight, color: NSColor, lines: Int) -> NSTextField {

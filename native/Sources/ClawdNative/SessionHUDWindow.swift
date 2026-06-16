@@ -48,7 +48,7 @@ final class SessionHUDWindowController: NSWindowController {
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.level = .floating
-    panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+    panel.collectionBehavior = [.ignoresCycle, .fullScreenDisallowsTiling]
     super.init(window: panel)
     let visual = NSVisualEffectView()
     visual.material = .hudWindow

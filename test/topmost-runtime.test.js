@@ -344,12 +344,46 @@ describe("topmost runtime Windows recovery", () => {
 });
 
 describe("topmost runtime macOS visibility", () => {
-  it("uses native macOS stationary visibility without Electron fallback when available", () => {
+  it("keeps pet-attached windows on the current macOS desktop", () => {
     const win = new FakeWindow();
-    const stationaryCalls = [];
+    const hitWin = new FakeWindow();
+    const updateBubble = new FakeWindow();
+    const sessionHud = new FakeWindow();
+    const fixedCalls = [];
     const runtime = createTopmostRuntime({
       isMac: true,
       getWin: () => win,
+      getHitWin: () => hitWin,
+      getUpdateBubbleWindow: () => updateBubble,
+      getSessionHudWindow: () => sessionHud,
+      applyFixedDesktopCollectionBehavior: (window) => {
+        fixedCalls.push(window);
+        return true;
+      },
+    });
+
+    runtime.reapplyMacVisibility();
+
+    for (const window of [win, hitWin, updateBubble, sessionHud]) {
+      assert.deepStrictEqual(window.calls, [
+        ["setAlwaysOnTop", true, createTopmostRuntime.MAC_TOPMOST_LEVEL],
+        ["setVisibleOnAllWorkspaces", false],
+      ]);
+    }
+    assert.deepStrictEqual(fixedCalls, [win, hitWin, updateBubble, sessionHud]);
+  });
+
+  it("uses native macOS stationary visibility for permission-style floating windows", () => {
+    const permissionBubble = new FakeWindow();
+    const stationaryCalls = [];
+    const fixedCalls = [];
+    const runtime = createTopmostRuntime({
+      isMac: true,
+      getPendingPermissions: () => [{ bubble: permissionBubble }],
+      applyFixedDesktopCollectionBehavior: (window) => {
+        fixedCalls.push(window);
+        return true;
+      },
       applyStationaryCollectionBehavior: (window) => {
         stationaryCalls.push(window);
         return true;
@@ -358,10 +392,11 @@ describe("topmost runtime macOS visibility", () => {
 
     runtime.reapplyMacVisibility();
 
-    assert.deepStrictEqual(win.calls, [
+    assert.deepStrictEqual(permissionBubble.calls, [
       ["setAlwaysOnTop", true, createTopmostRuntime.MAC_TOPMOST_LEVEL],
     ]);
-    assert.deepStrictEqual(stationaryCalls, [win]);
+    assert.deepStrictEqual(stationaryCalls, [permissionBubble]);
+    assert.deepStrictEqual(fixedCalls, []);
   });
 
   it("reapplies native visibility first and falls back to Electron cross-space visibility", () => {
@@ -371,6 +406,7 @@ describe("topmost runtime macOS visibility", () => {
     const updateBubble = new FakeWindow();
     const sessionHud = new FakeWindow();
     const contextMenuOwner = new FakeWindow();
+    const fixedCalls = [];
     const stationaryCalls = [];
     const runtime = createTopmostRuntime({
       isMac: true,
@@ -381,6 +417,10 @@ describe("topmost runtime macOS visibility", () => {
       getSessionHudWindow: () => sessionHud,
       getContextMenuOwner: () => contextMenuOwner,
       getShowDock: () => false,
+      applyFixedDesktopCollectionBehavior: (window) => {
+        fixedCalls.push(window);
+        return false;
+      },
       applyStationaryCollectionBehavior: (window) => {
         stationaryCalls.push(window);
         return false;
@@ -389,7 +429,13 @@ describe("topmost runtime macOS visibility", () => {
 
     runtime.reapplyMacVisibility();
 
-    for (const window of [win, hitWin, permissionBubble, updateBubble, sessionHud, contextMenuOwner]) {
+    for (const window of [win, hitWin, updateBubble, sessionHud]) {
+      assert.deepStrictEqual(window.calls, [
+        ["setAlwaysOnTop", true, createTopmostRuntime.MAC_TOPMOST_LEVEL],
+        ["setVisibleOnAllWorkspaces", false],
+      ]);
+    }
+    for (const window of [permissionBubble, contextMenuOwner]) {
       assert.deepStrictEqual(window.calls, [
         ["setAlwaysOnTop", true, createTopmostRuntime.MAC_TOPMOST_LEVEL],
         ["setVisibleOnAllWorkspaces", true, {
@@ -398,7 +444,8 @@ describe("topmost runtime macOS visibility", () => {
         }],
       ]);
     }
-    assert.strictEqual(stationaryCalls.length, 12);
+    assert.deepStrictEqual(fixedCalls, [win, hitWin, updateBubble, sessionHud]);
+    assert.strictEqual(stationaryCalls.length, 4);
   });
 
   it("honors deferred macOS visibility markers", () => {
