@@ -180,6 +180,51 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertTrue(String(describing: preCompact).contains("PreCompact"))
   }
 
+  func testQoderInstallerPreservesUserHooksAndNormalizesDisabledMarker() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "hooksConfig": [
+        "disabled": ["node /tmp/qoder-hook.js PreToolUse", "other"]
+      ],
+      "hooks": [
+        "PermissionRequest": [[
+          "matcher": "*",
+          "hooks": [
+            [
+              "type": "command",
+              "command": "echo user"
+            ],
+            [
+              "name": "clawd",
+              "type": "command",
+              "command": "node /old/qoder-hook.js PermissionRequest"
+            ]
+          ]
+        ]]
+      ]
+    ], to: ".qoder/settings.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "qoder", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+
+    let settings = try fixture.readJSON(".qoder/settings.json")
+    let hooksConfig = try XCTUnwrap(settings["hooksConfig"] as? [String: Any])
+    XCTAssertEqual(hooksConfig["disabled"] as? [String], ["clawd", "other"])
+
+    let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+    let permission = try XCTUnwrap(hooks["PermissionRequest"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: permission).contains("echo user"))
+    XCTAssertTrue(String(describing: permission).contains("qoder-hook.js"))
+    XCTAssertTrue(String(describing: permission).contains("/opt/homebrew/bin/node"))
+    let denied = try XCTUnwrap(hooks["PermissionDenied"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: denied).contains("PermissionDenied"))
+  }
+
   func testCopilotInstallerSkipsPermissionWhenUserHookExists() throws {
     let fixture = try Fixture()
     let copilotHome = fixture.home.appendingPathComponent(".copilot")

@@ -129,6 +129,22 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(NativeHookRuntime.statePostDelay(agentId: "reasonix", event: "PostToolUse"), 0)
   }
 
+  func testQoderPermissionRequestIsPassiveNotification() throws {
+    let payload = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","cwd":"/repo","tool_name":"Bash","tool_input":{"command":"ls"}}"#.utf8)
+    let route = NativeHookRuntime(agentId: "qoder", event: "PreToolUse", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "qoder")
+    XCTAssertEqual(body.string("session_id"), "qoder:s1")
+    XCTAssertEqual(body.string("state"), "notification")
+    XCTAssertEqual(body.string("event"), "Notification")
+    XCTAssertEqual(body.string("cwd"), "/repo")
+    XCTAssertEqual(body.string("tool_name"), "Bash")
+    XCTAssertNotNil(body.string("tool_input_fingerprint"))
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "qoder", event: "PermissionRequest"), "{}")
+  }
+
   func testQwenPermissionIncludesEmptySuggestionsForHookParity() throws {
     let payload = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/repo"}"#.utf8)
     let route = NativeHookRuntime(agentId: "qwen-code", event: "PermissionRequest", environment: [:]).route(stdin: payload)

@@ -55,6 +55,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "copilot-cli",
     "gemini-cli",
     "qwen-code",
+    "qoder",
     "reasonix"
   ]
 
@@ -95,6 +96,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installGemini()
       case "reasonix":
         return try installReasonix()
+      case "qoder":
+        return try installQoder()
       default:
         return nil
       }
@@ -124,6 +127,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallGemini()
       case "reasonix":
         return try uninstallReasonix()
+      case "qoder":
+        return try uninstallQoder()
       default:
         return nil
       }
@@ -379,7 +384,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
           "command": hookCommand(agentId: "gemini-cli", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "gemini-hook.js")
         ]]
       ]
-      counters.merge(syncGeminiHookEntry(
+      counters.merge(syncDedicatedNestedHookEntry(
         settings: &settings,
         event: event,
         marker: "gemini-hook.js",
@@ -412,6 +417,66 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       action: "uninstall",
       status: "ok",
       message: "Swift Gemini hooks removed from \(settingsPath.path)",
+      removed: counters.removed
+    )
+  }
+
+  private func installQoder() throws -> NativeIntegrationSummary {
+    let qoderDir = homeDirectory.appendingPathComponent(".qoder", isDirectory: true)
+    guard fileManager.fileExists(atPath: qoderDir.path) else {
+      return .init(agentId: "qoder", action: "install", status: "skip", message: "\(qoderDir.path) not found")
+    }
+    let settingsPath = qoderDir.appendingPathComponent("settings.json")
+    var settings = try readJSONObject(settingsPath)
+    var counters = ChangeCounters()
+    if normalizeCommandDisabledHooks(settings: &settings, marker: "qoder-hook.js") {
+      counters.updated += 1
+    }
+    let nodeBin = resolveNodeBin(existingSettings: settings, marker: "qoder-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/qoder-hook.js").path
+
+    for event in Self.qoderEvents {
+      let desiredEntry: [String: Any] = [
+        "matcher": "*",
+        "hooks": [[
+          "name": "clawd",
+          "type": "command",
+          "command": hookCommand(agentId: "qoder", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "qoder-hook.js")
+        ]]
+      ]
+      counters.merge(syncDedicatedNestedHookEntry(
+        settings: &settings,
+        event: event,
+        marker: "qoder-hook.js",
+        desiredEntry: desiredEntry
+      ))
+    }
+    try writeJSONObject(settings, to: settingsPath)
+    return NativeIntegrationSummary(
+      agentId: "qoder",
+      action: "install",
+      status: "ok",
+      message: "Swift Qoder hooks -> \(settingsPath.path)",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      removed: counters.removed
+    )
+  }
+
+  private func uninstallQoder() throws -> NativeIntegrationSummary {
+    let settingsPath = homeDirectory.appendingPathComponent(".qoder/settings.json")
+    var settings = try readJSONObject(settingsPath, missingIsEmpty: false)
+    var counters = ChangeCounters()
+    for event in Self.qoderEvents {
+      counters.merge(removeCommandHooks(settings: &settings, event: event, marker: "qoder-hook.js"))
+    }
+    try writeJSONObject(settings, to: settingsPath, backup: true)
+    return NativeIntegrationSummary(
+      agentId: "qoder",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Qoder hooks removed from \(settingsPath.path)",
       removed: counters.removed
     )
   }
@@ -745,7 +810,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return counters
   }
 
-  private func syncGeminiHookEntry(
+  private func syncDedicatedNestedHookEntry(
     settings: inout [String: Any],
     event: String,
     marker: String,
@@ -1073,6 +1138,10 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
   }
 
   private func normalizeGeminiDisabledHooks(settings: inout [String: Any]) -> Bool {
+    normalizeCommandDisabledHooks(settings: &settings, marker: "gemini-hook.js")
+  }
+
+  private func normalizeCommandDisabledHooks(settings: inout [String: Any], marker: String) -> Bool {
     guard var hooksConfig = settings["hooksConfig"] as? [String: Any],
           let disabled = hooksConfig["disabled"] as? [Any]
     else { return false }
@@ -1090,7 +1159,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         next.append(entry)
         continue
       }
-      if containsMarker(entry, marker: "gemini-hook.js") {
+      if containsMarker(entry, marker: marker) {
         if !sawClawd {
           next.append("clawd")
           sawClawd = true
@@ -1195,6 +1264,19 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "SubagentStop",
     "Notification",
     "PreCompact"
+  ]
+
+  private static let qoderEvents = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "Stop",
+    "Notification",
+    "PermissionRequest",
+    "PermissionDenied",
+    "SessionEnd"
   ]
 
   private static let copilotEvents = [

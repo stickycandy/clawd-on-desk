@@ -33,6 +33,8 @@ public struct NativeHookRuntime {
       return geminiRoute(payload: object)
     case "reasonix":
       return reasonixRoute(payload: object)
+    case "qoder":
+      return qoderRoute(payload: object)
     default:
       return .none
     }
@@ -65,6 +67,7 @@ public struct NativeHookRuntime {
   }
 
   public static func stdout(agentId: String, event: String, stdin: Data? = nil) -> String? {
+    if agentId == "qoder" { return "{}" }
     guard agentId == "gemini-cli" else { return nil }
     var hookEvent = event
     if let stdin,
@@ -289,6 +292,22 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func qoderRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("hook_event_name") ?? event
+    guard let mapped = Self.qoderState[hookEvent] else { return .none }
+    var body = baseState(
+      state: mapped.state,
+      sessionId: normalizeSessionId(payload.string("session_id"), prefix: "qoder"),
+      event: mapped.event,
+      agentId: "qoder",
+      payload: payload
+    )
+    if Self.qoderToolMetadataEvents.contains(hookEvent) {
+      addToolMetadata(payload: payload, body: &body)
+    }
+    return .state(.object(body))
+  }
+
   private func baseState(
     state: String,
     sessionId: String,
@@ -369,6 +388,8 @@ public struct NativeHookRuntime {
       return ["gemini"]
     case "reasonix":
       return ["reasonix"]
+    case "qoder":
+      return ["qoder", "qodercli", "qoder-cli"]
     default:
       return []
     }
@@ -945,6 +966,27 @@ public struct NativeHookRuntime {
     "SubagentStop": "working",
     "Notification": "notification",
     "PreCompact": "sweeping"
+  ]
+
+  private static let qoderState: [String: (state: String, event: String)] = [
+    "SessionStart": ("idle", "SessionStart"),
+    "UserPromptSubmit": ("thinking", "UserPromptSubmit"),
+    "PreToolUse": ("working", "PreToolUse"),
+    "PostToolUse": ("working", "PostToolUse"),
+    "PostToolUseFailure": ("error", "PostToolUseFailure"),
+    "Stop": ("attention", "Stop"),
+    "Notification": ("notification", "Notification"),
+    "PermissionRequest": ("notification", "Notification"),
+    "PermissionDenied": ("notification", "Notification"),
+    "SessionEnd": ("sleeping", "SessionEnd")
+  ]
+
+  private static let qoderToolMetadataEvents: Set<String> = [
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PermissionRequest",
+    "PermissionDenied"
   ]
 
   private static let skippedCodexResponseItemTypes: Set<String> = [
