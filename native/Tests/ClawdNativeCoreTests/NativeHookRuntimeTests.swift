@@ -109,6 +109,26 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(NativeHookRuntime.stdout(agentId: "gemini-cli", event: "AfterTool"), #"{"decision":"allow"}"#)
   }
 
+  func testReasonixUsesPayloadEventAndToolName() throws {
+    let payload = Data(#"{"event":"PreToolUse","session_id":"s1","cwd":"/repo","toolName":"Read"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "reasonix", event: "unknown", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "reasonix")
+    XCTAssertEqual(body.string("session_id"), "reasonix:s1")
+    XCTAssertEqual(body.string("state"), "working")
+    XCTAssertEqual(body.string("event"), "PreToolUse")
+    XCTAssertEqual(body.string("cwd"), "/repo")
+    XCTAssertEqual(body.string("tool_name"), "Read")
+  }
+
+  func testReasonixStopUsesPostDelay() throws {
+    let payload = Data(#"{"event":"Stop"}"#.utf8)
+    XCTAssertEqual(NativeHookRuntime.statePostDelay(agentId: "reasonix", event: "PostToolUse", stdin: payload), 0.2)
+    XCTAssertEqual(NativeHookRuntime.statePostDelay(agentId: "reasonix", event: "PostToolUse"), 0)
+  }
+
   func testQwenPermissionIncludesEmptySuggestionsForHookParity() throws {
     let payload = Data(#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"/repo"}"#.utf8)
     let route = NativeHookRuntime(agentId: "qwen-code", event: "PermissionRequest", environment: [:]).route(stdin: payload)

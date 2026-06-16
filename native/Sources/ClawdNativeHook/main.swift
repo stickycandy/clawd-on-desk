@@ -18,6 +18,10 @@ struct ClawdNativeHookMain {
       if let stdout = NativeHookRuntime.stdout(agentId: agentId, event: event, stdin: input) {
         FileHandle.standardOutput.write(Data((stdout + "\n").utf8))
       }
+      let delay = NativeHookRuntime.statePostDelay(agentId: agentId, event: event, stdin: input)
+      if delay > 0 {
+        Thread.sleep(forTimeInterval: delay)
+      }
       post(path: "/state", body: body, timeout: 0.2) { _ in }
       exit(0)
     case .permission(let body):

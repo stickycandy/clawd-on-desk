@@ -143,6 +143,43 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertTrue(String(describing: preCompress).contains("PreCompress"))
   }
 
+  func testReasonixInstallerPreservesUserHooksAndReplacesManagedEntry() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "hooks": [
+        "PreToolUse": [
+          [
+            "match": "user",
+            "command": "echo user"
+          ],
+          [
+            "match": "",
+            "command": "node /old/reasonix-hook.js",
+            "timeout": 5
+          ]
+        ]
+      ]
+    ], to: ".reasonix/settings.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "reasonix", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+
+    let settings = try fixture.readJSON(".reasonix/settings.json")
+    let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+    let preTool = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: preTool).contains("echo user"))
+    XCTAssertTrue(String(describing: preTool).contains("reasonix-hook.js"))
+    XCTAssertTrue(String(describing: preTool).contains("/opt/homebrew/bin/node"))
+    XCTAssertFalse(String(describing: preTool).contains("timeout"))
+    let preCompact = try XCTUnwrap(hooks["PreCompact"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: preCompact).contains("PreCompact"))
+  }
+
   func testCopilotInstallerSkipsPermissionWhenUserHookExists() throws {
     let fixture = try Fixture()
     let copilotHome = fixture.home.appendingPathComponent(".copilot")

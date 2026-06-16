@@ -31,6 +31,8 @@ public struct NativeHookRuntime {
       return copilotRoute(payload: object)
     case "gemini-cli":
       return geminiRoute(payload: object)
+    case "reasonix":
+      return reasonixRoute(payload: object)
     default:
       return .none
     }
@@ -75,6 +77,18 @@ public struct NativeHookRuntime {
       return #"{"decision":"allow"}"#
     }
     return "{}"
+  }
+
+  public static func statePostDelay(agentId: String, event: String, stdin: Data? = nil) -> TimeInterval {
+    guard agentId == "reasonix" else { return 0 }
+    var hookEvent = event
+    if let stdin,
+       case .object(let object) = try? JSONDecoder().decode(JSONValue.self, from: stdin),
+       let payloadEvent = object.string("event"),
+       !payloadEvent.isEmpty {
+      hookEvent = payloadEvent
+    }
+    return hookEvent == "Stop" ? 0.2 : 0
   }
 
   private func claudeRoute(payload: [String: JSONValue]) -> Route {
@@ -257,6 +271,24 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func reasonixRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("event") ?? event
+    guard let state = Self.reasonixState[hookEvent] else { return .none }
+    var body = baseState(
+      state: state,
+      sessionId: normalizeSessionId(payload.string("session_id"), prefix: "reasonix"),
+      event: hookEvent,
+      agentId: "reasonix",
+      payload: payload
+    )
+    if hookEvent == "PreToolUse" || hookEvent == "PostToolUse",
+       let toolName = payload.string("toolName")?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !toolName.isEmpty {
+      body["tool_name"] = .string(toolName)
+    }
+    return .state(.object(body))
+  }
+
   private func baseState(
     state: String,
     sessionId: String,
@@ -335,6 +367,8 @@ public struct NativeHookRuntime {
       return ["copilot"]
     case "gemini-cli":
       return ["gemini"]
+    case "reasonix":
+      return ["reasonix"]
     default:
       return []
     }
@@ -899,6 +933,18 @@ public struct NativeHookRuntime {
     "AfterAgent": ("idle", "AfterAgent", false),
     "Notification": ("notification", "Notification", false),
     "PreCompress": ("idle", "PreCompress", true)
+  ]
+
+  private static let reasonixState = [
+    "SessionStart": "idle",
+    "SessionEnd": "sleeping",
+    "UserPromptSubmit": "thinking",
+    "PreToolUse": "working",
+    "PostToolUse": "working",
+    "Stop": "attention",
+    "SubagentStop": "working",
+    "Notification": "notification",
+    "PreCompact": "sweeping"
   ]
 
   private static let skippedCodexResponseItemTypes: Set<String> = [

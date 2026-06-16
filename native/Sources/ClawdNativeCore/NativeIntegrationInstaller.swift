@@ -54,7 +54,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "codex",
     "copilot-cli",
     "gemini-cli",
-    "qwen-code"
+    "qwen-code",
+    "reasonix"
   ]
 
   private let projectRoot: URL
@@ -92,6 +93,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installCopilot()
       case "gemini-cli":
         return try installGemini()
+      case "reasonix":
+        return try installReasonix()
       default:
         return nil
       }
@@ -119,6 +122,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallCopilot()
       case "gemini-cli":
         return try uninstallGemini()
+      case "reasonix":
+        return try uninstallReasonix()
       default:
         return nil
       }
@@ -407,6 +412,59 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       action: "uninstall",
       status: "ok",
       message: "Swift Gemini hooks removed from \(settingsPath.path)",
+      removed: counters.removed
+    )
+  }
+
+  private func installReasonix() throws -> NativeIntegrationSummary {
+    let reasonixDir = homeDirectory.appendingPathComponent(".reasonix", isDirectory: true)
+    guard fileManager.fileExists(atPath: reasonixDir.path) else {
+      return .init(agentId: "reasonix", action: "install", status: "skip", message: "\(reasonixDir.path) not found")
+    }
+    let settingsPath = reasonixDir.appendingPathComponent("settings.json")
+    var settings = try readJSONObject(settingsPath)
+    var counters = ChangeCounters()
+    let nodeBin = resolveNodeBin(existingSettings: settings, marker: "reasonix-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/reasonix-hook.js").path
+
+    for event in Self.reasonixEvents {
+      let desiredEntry: [String: Any] = [
+        "match": "*",
+        "command": hookCommand(agentId: "reasonix", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "reasonix-hook.js")
+      ]
+      counters.merge(syncWholeHookEntry(
+        settings: &settings,
+        event: event,
+        marker: "reasonix-hook.js",
+        desiredEntry: desiredEntry
+      ))
+    }
+    try writeJSONObject(settings, to: settingsPath)
+    return NativeIntegrationSummary(
+      agentId: "reasonix",
+      action: "install",
+      status: "ok",
+      message: "Swift Reasonix hooks -> \(settingsPath.path)",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      removed: counters.removed
+    )
+  }
+
+  private func uninstallReasonix() throws -> NativeIntegrationSummary {
+    let settingsPath = homeDirectory.appendingPathComponent(".reasonix/settings.json")
+    var settings = try readJSONObject(settingsPath, missingIsEmpty: false)
+    var counters = ChangeCounters()
+    for event in Self.reasonixEvents {
+      counters.merge(removeCommandHooks(settings: &settings, event: event, marker: "reasonix-hook.js"))
+    }
+    try writeJSONObject(settings, to: settingsPath, backup: true)
+    return NativeIntegrationSummary(
+      agentId: "reasonix",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Reasonix hooks removed from \(settingsPath.path)",
       removed: counters.removed
     )
   }
@@ -1125,6 +1183,18 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "AfterTool",
     "Notification",
     "PreCompress"
+  ]
+
+  private static let reasonixEvents = [
+    "SessionStart",
+    "SessionEnd",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "Stop",
+    "SubagentStop",
+    "Notification",
+    "PreCompact"
   ]
 
   private static let copilotEvents = [
