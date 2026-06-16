@@ -242,6 +242,56 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertNil(uninstalled["clawd"])
   }
 
+  func testKimiInstallerPreservesUserBlocksAndPermissionMode() throws {
+    let fixture = try Fixture()
+    try fixture.writeText("""
+    default_model = "kimi-for-coding"
+    hooks = []
+
+    [[hooks]]
+    event = "PreToolUse"
+    command = 'echo user'
+    matcher = ""
+    timeout = 9
+
+    [[hooks]]
+    event = "SessionStart"
+    command = 'CLAWD_KIMI_PERMISSION_MODE=suspect node /old/kimi-hook.js'
+    matcher = ""
+    timeout = 30
+
+    [server]
+    host = "127.0.0.1"
+    """, to: ".kimi/config.toml")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "kimi-cli", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+    XCTAssertEqual(summary.updated, 1)
+    XCTAssertEqual(summary.removed, 1)
+
+    let installed = try fixture.readText(".kimi/config.toml")
+    XCTAssertTrue(installed.contains("echo user"))
+    XCTAssertTrue(installed.contains("[server]"))
+    XCTAssertFalse(installed.contains("hooks = []"))
+    XCTAssertFalse(installed.contains("/old/kimi-hook.js"))
+    XCTAssertTrue(installed.contains("CLAWD_KIMI_PERMISSION_MODE=suspect"))
+    XCTAssertTrue(installed.contains(#""/opt/homebrew/bin/node" "\#(fixture.projectRoot.path)/hooks/kimi-hook.js" "SessionStart""#))
+    XCTAssertEqual(installed.components(separatedBy: "kimi-hook.js").count - 1, 13)
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "kimi-cli"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 13)
+    let uninstalled = try fixture.readText(".kimi/config.toml")
+    XCTAssertTrue(uninstalled.contains("echo user"))
+    XCTAssertTrue(uninstalled.contains("[server]"))
+    XCTAssertFalse(uninstalled.contains("kimi-hook.js"))
+  }
+
   func testCursorInstallerPreservesUserHooksAndUninstallsManagedEntries() throws {
     let fixture = try Fixture()
     try fixture.writeJSON([

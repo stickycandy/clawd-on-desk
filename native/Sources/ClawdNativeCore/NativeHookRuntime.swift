@@ -33,6 +33,8 @@ public struct NativeHookRuntime {
       return geminiRoute(payload: object)
     case "antigravity-cli":
       return antigravityRoute(payload: object)
+    case "kimi-cli":
+      return kimiRoute(payload: object)
     case "cursor-agent":
       return cursorRoute(payload: object)
     case "codebuddy":
@@ -331,6 +333,37 @@ public struct NativeHookRuntime {
     )))
   }
 
+  private func kimiRoute(payload: [String: JSONValue]) -> Route {
+    let payloadEvent = payload.string("hook_event_name") ?? payload.string("event")
+    let hookEvent = Self.kimiState[event] != nil ? event : (payloadEvent ?? event)
+    guard var state = Self.kimiState[hookEvent] else { return .none }
+    var resolvedEvent = hookEvent
+    var permissionSuspect = false
+
+    switch kimiPreToolClassification(event: hookEvent, payload: payload) {
+    case "immediate":
+      state = "notification"
+      resolvedEvent = "PermissionRequest"
+    case "suspect":
+      permissionSuspect = true
+    default:
+      break
+    }
+
+    var body = baseState(
+      state: state,
+      sessionId: normalizeSessionId(payload.string("session_id"), prefix: "kimi-cli"),
+      event: resolvedEvent,
+      agentId: "kimi-cli",
+      payload: payload
+    )
+    if permissionSuspect {
+      body["permission_suspect"] = .bool(true)
+    }
+    addKimiToolMetadata(payload: payload, body: &body)
+    return .state(.object(body))
+  }
+
   private func cursorRoute(payload: [String: JSONValue]) -> Route {
     let hookEvent = payload.string("hook_event_name") ?? event
     guard var mapped = Self.cursorState[hookEvent] else { return .none }
@@ -535,6 +568,8 @@ public struct NativeHookRuntime {
       return ["gemini"]
     case "antigravity-cli":
       return ["agy"]
+    case "kimi-cli":
+      return ["kimi", "Kimi Code"]
     case "cursor-agent":
       return ["cursor", "Cursor"]
     case "codebuddy":
@@ -602,6 +637,149 @@ public struct NativeHookRuntime {
       fallback = nil
     }
     return normalizeSessionId(firstNonEmpty(payload.string("conversationId"), payload.string("session_id"), fallback), prefix: "antigravity")
+  }
+
+  private func kimiPreToolClassification(event: String, payload: [String: JSONValue]) -> String {
+    guard event == "PreToolUse" else { return "none" }
+    let normalizedTool = kimiNormalizedToolName(kimiToolName(payload))
+    guard Self.kimiPermissionTools.contains(normalizedTool) else { return "none" }
+    if kimiExplicitPermissionSignal(payload) { return "immediate" }
+    if environment["CLAWD_KIMI_DISABLE_PRETOOL_PERMISSION"] == "1" { return "none" }
+    if environment["CLAWD_KIMI_PERMISSION_IMMEDIATE"] == "1" { return "immediate" }
+    switch kimiPermissionMode() {
+    case "suspect":
+      return "suspect"
+    case "explicit":
+      return "none"
+    default:
+      break
+    }
+    if environment["CLAWD_KIMI_PERMISSION_SUSPECT"] == "1" { return "suspect" }
+    return "none"
+  }
+
+  private func kimiPermissionMode() -> String? {
+    let value = environment["CLAWD_KIMI_PERMISSION_MODE"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    return value == "explicit" || value == "suspect" ? value : nil
+  }
+
+  private func kimiExplicitPermissionSignal(_ payload: [String: JSONValue]) -> Bool {
+    let topLevel = [
+      "permission_required",
+      "requires_approval",
+      "waiting_for_approval",
+      "is_permission_request",
+      "permissionRequired",
+      "requiresApproval",
+      "waitingForApproval",
+      "isPermissionRequest",
+      "approval_required",
+      "needs_approval",
+      "needsApproval"
+    ]
+    if topLevel.contains(where: { kimiTruthy(payload[$0]) }) { return true }
+    if kimiWaitingApprovalStatus(payload.string("permission_status")) || kimiWaitingApprovalStatus(payload.string("approval_status")) {
+      return true
+    }
+    for key in ["permission", "approval", "permission_request"] {
+      guard let nested = payload.object(key) else { continue }
+      let nestedFlags = [
+        "required",
+        "requires_approval",
+        "requiresApproval",
+        "waiting_for_approval",
+        "waitingForApproval",
+        "is_permission_request",
+        "isPermissionRequest",
+        "needs_approval",
+        "needsApproval"
+      ]
+      if nestedFlags.contains(where: { kimiTruthy(nested[$0]) }) { return true }
+      if kimiWaitingApprovalStatus(nested.string("status")) || kimiWaitingApprovalStatus(nested.string("state")) {
+        return true
+      }
+    }
+    return kimiKeywordPermissionSignal(.object(payload), depth: 0)
+  }
+
+  private func kimiTruthy(_ value: JSONValue?) -> Bool {
+    switch value {
+    case .bool(let value):
+      return value
+    case .number(let value):
+      return value == 1
+    case .string(let value):
+      let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      return normalized == "true" || normalized == "1" || normalized == "yes"
+    default:
+      return false
+    }
+  }
+
+  private func kimiWaitingApprovalStatus(_ value: String?) -> Bool {
+    let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().replacingOccurrences(of: " ", with: "_") ?? ""
+    return [
+      "waiting_for_approval",
+      "awaiting_approval",
+      "requires_approval",
+      "approval_required",
+      "permission_required",
+      "needs_approval"
+    ].contains(normalized)
+  }
+
+  private func kimiPermissionKeyword(_ key: String) -> Bool {
+    let normalized = key.lowercased().replacingOccurrences(of: #"[^a-z0-9]+"#, with: "_", options: .regularExpression)
+    return normalized.contains("permission")
+      || normalized.contains("approval")
+      || normalized.contains("authorize")
+      || normalized.contains("consent")
+  }
+
+  private func kimiPendingLike(_ value: JSONValue) -> Bool {
+    if kimiTruthy(value) { return true }
+    guard case .string(let string) = value else { return false }
+    let normalized = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().replacingOccurrences(of: " ", with: "_")
+    return normalized.contains("wait")
+      || normalized.contains("pend")
+      || normalized.contains("request")
+      || normalized.contains("require")
+      || normalized.contains("need_approval")
+      || normalized == "ask"
+  }
+
+  private func kimiKeywordPermissionSignal(_ value: JSONValue, depth: Int) -> Bool {
+    guard depth <= 3, case .object(let object) = value else { return false }
+    for (key, nested) in object {
+      if kimiPermissionKeyword(key) && kimiPendingLike(nested) { return true }
+      if kimiKeywordPermissionSignal(nested, depth: depth + 1) { return true }
+    }
+    return false
+  }
+
+  private func kimiToolName(_ payload: [String: JSONValue]) -> String {
+    if let value = firstNonEmpty(payload.string("tool_name"), payload.string("toolName"), payload.string("tool")) {
+      return value
+    }
+    if let tool = payload.object("tool") {
+      return firstNonEmpty(tool.string("name"), tool.string("tool_name")) ?? ""
+    }
+    return ""
+  }
+
+  private func kimiNormalizedToolName(_ value: String) -> String {
+    value.lowercased().replacingOccurrences(of: "_", with: "")
+  }
+
+  private func addKimiToolMetadata(payload: [String: JSONValue], body: inout [String: JSONValue]) {
+    let tool = kimiToolName(payload)
+    if !tool.isEmpty {
+      body["tool_name"] = .string(tool)
+    }
+    let toolInput = payload["tool_input"] ?? payload["toolInput"]
+    if let fingerprint = Self.fingerprint(toolInput) {
+      body["tool_input_fingerprint"] = .string(fingerprint)
+    }
   }
 
   private func addToolMetadata(payload: [String: JSONValue], body: inout [String: JSONValue]) {
@@ -1230,6 +1408,29 @@ public struct NativeHookRuntime {
     "PostToolUse": ("working", "PostToolUse"),
     "PostInvocation": ("idle", "AfterAgent"),
     "Stop": ("attention", "Stop")
+  ]
+
+  private static let kimiState = [
+    "SessionStart": "idle",
+    "SessionEnd": "sleeping",
+    "UserPromptSubmit": "thinking",
+    "PreToolUse": "working",
+    "PostToolUse": "working",
+    "PostToolUseFailure": "error",
+    "Stop": "attention",
+    "StopFailure": "error",
+    "SubagentStart": "juggling",
+    "SubagentStop": "working",
+    "PreCompact": "sweeping",
+    "PostCompact": "attention",
+    "Notification": "notification"
+  ]
+
+  private static let kimiPermissionTools: Set<String> = [
+    "shell",
+    "writefile",
+    "strreplacefile",
+    "background"
   ]
 
   private static let cursorState: [String: (state: String, event: String)] = [

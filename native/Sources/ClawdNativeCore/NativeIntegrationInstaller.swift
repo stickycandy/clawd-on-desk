@@ -57,6 +57,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "cursor-agent",
     "gemini-cli",
     "antigravity-cli",
+    "kimi-cli",
     "kiro-cli",
     "codewhale",
     "qwen-code",
@@ -105,6 +106,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installGemini()
       case "antigravity-cli":
         return try installAntigravity()
+      case "kimi-cli":
+        return try installKimi()
       case "kiro-cli":
         return try installKiro()
       case "codewhale":
@@ -146,6 +149,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallGemini()
       case "antigravity-cli":
         return try uninstallAntigravity()
+      case "kimi-cli":
+        return try uninstallKimi()
       case "kiro-cli":
         return try uninstallKiro()
       case "codewhale":
@@ -578,6 +583,67 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       status: "ok",
       message: "Swift Antigravity hooks removed from \(hooksPath.path)",
       removed: 1
+    )
+  }
+
+  private func installKimi() throws -> NativeIntegrationSummary {
+    let configPath = homeDirectory.appendingPathComponent(".kimi/config.toml")
+    let kimiDir = configPath.deletingLastPathComponent()
+    guard fileManager.fileExists(atPath: kimiDir.path) else {
+      return .init(agentId: "kimi-cli", action: "install", status: "skip", message: "\(kimiDir.path) not found")
+    }
+    let original = (try? String(contentsOf: configPath, encoding: .utf8)) ?? "default_model = \"kimi-for-coding\"\n"
+    let stripped = stripKimiHookBlocks(from: original)
+    let base = removeKimiEmptyHooksArray(from: stripped.content)
+    let nodeBin = resolveNodeBin(existingSettings: ["content": original], marker: "kimi-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/kimi-hook.js").path
+    let mode = normalizeKimiPermissionMode(environment["CLAWD_KIMI_PERMISSION_MODE"]) ?? extractExistingKimiPermissionMode(from: original)
+    let modePrefix = mode.map { "CLAWD_KIMI_PERMISSION_MODE=\($0) " } ?? ""
+    let hookBlocks = Self.kimiEvents.map { event in
+      kimiHookBlock(
+        event: event,
+        command: "\(modePrefix)\(hookCommand(agentId: "kimi-cli", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "kimi-hook.js"))"
+      )
+    }.joined(separator: "\n")
+    let next = trimTrailingWhitespace(base) + "\n\n" + hookBlocks
+
+    var counters = ChangeCounters()
+    if stripped.removed == 0 {
+      counters.added = Self.kimiEvents.count
+    } else if next == original {
+      counters.skipped = 1
+    } else {
+      counters.updated = 1
+    }
+
+    if next != original {
+      try writeText(next, to: configPath)
+    }
+    return NativeIntegrationSummary(
+      agentId: "kimi-cli",
+      action: "install",
+      status: "ok",
+      message: "Swift Kimi hooks -> \(configPath.path)",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      removed: stripped.removed
+    )
+  }
+
+  private func uninstallKimi() throws -> NativeIntegrationSummary {
+    let configPath = homeDirectory.appendingPathComponent(".kimi/config.toml")
+    let original = try String(contentsOf: configPath, encoding: .utf8)
+    let stripped = stripKimiHookBlocks(from: original)
+    if stripped.content != original {
+      try writeText(stripped.content, to: configPath)
+    }
+    return NativeIntegrationSummary(
+      agentId: "kimi-cli",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Kimi hooks removed from \(configPath.path)",
+      removed: stripped.removed
     )
   }
 
@@ -1032,6 +1098,86 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       "if [ \"$status\" -eq 0 ] && [ -n \"$out\" ] && printf '%s' \"$out\" | \(validator) 2>/dev/null; then printf '%s\\n' \"$out\"; else printf '%s\\n' \(fallback); fi",
       "exit 0"
     ].joined(separator: "; ")
+  }
+
+  private func kimiHookBlock(event: String, command: String) -> String {
+    [
+      "[[hooks]]",
+      "event = \"\(event)\"",
+      "command = '\(command)'",
+      "matcher = \"\"",
+      "timeout = 30",
+      ""
+    ].joined(separator: "\n")
+  }
+
+  private func stripKimiHookBlocks(from content: String) -> (content: String, removed: Int) {
+    guard !content.isEmpty else { return ("", 0) }
+    let lines = content.components(separatedBy: "\n")
+    var output: [String] = []
+    var removed = 0
+    var index = 0
+    while index < lines.count {
+      let line = lines[index]
+      if isKimiHooksHeader(line) {
+        let start = index
+        var end = index + 1
+        while end < lines.count, !isTomlSectionHeader(lines[end]) {
+          end += 1
+        }
+        let block = lines[start..<end].joined(separator: "\n")
+        if block.contains("kimi-hook.js") {
+          removed += 1
+        } else {
+          output.append(block)
+        }
+        index = end
+      } else {
+        output.append(line)
+        index += 1
+      }
+    }
+    return (output.joined(separator: "\n"), removed)
+  }
+
+  private func removeKimiEmptyHooksArray(from content: String) -> String {
+    content
+      .components(separatedBy: "\n")
+      .filter { line in
+        line.range(of: #"^\s*hooks\s*=\s*\[\]\s*$"#, options: .regularExpression) == nil
+      }
+      .joined(separator: "\n")
+  }
+
+  private func isKimiHooksHeader(_ line: String) -> Bool {
+    line.range(of: #"^\s*\[\[hooks\]\]\s*(?:#.*)?$"#, options: .regularExpression) != nil
+  }
+
+  private func isTomlSectionHeader(_ line: String) -> Bool {
+    line.range(of: #"^\s*\[\[?[^\]]+\]\]?\s*(?:#.*)?$"#, options: .regularExpression) != nil
+  }
+
+  private func normalizeKimiPermissionMode(_ value: String?) -> String? {
+    let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    return normalized == "explicit" || normalized == "suspect" ? normalized : nil
+  }
+
+  private func extractExistingKimiPermissionMode(from content: String) -> String? {
+    guard content.contains("kimi-hook.js") else { return nil }
+    guard let range = content.range(of: #"CLAWD_KIMI_PERMISSION_MODE=([A-Za-z]+)"#, options: .regularExpression) else {
+      return nil
+    }
+    let match = String(content[range])
+    let value = match.replacingOccurrences(of: "CLAWD_KIMI_PERMISSION_MODE=", with: "")
+    return normalizeKimiPermissionMode(value)
+  }
+
+  private func trimTrailingWhitespace(_ value: String) -> String {
+    var result = value
+    while let last = result.last, last.isWhitespace {
+      result.removeLast()
+    }
+    return result
   }
 
   private func resolveNativeHookBinary() -> String? {
@@ -1929,6 +2075,22 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     if event == "Stop" { return #"{"decision":"allow"}"# }
     return "{}"
   }
+
+  private static let kimiEvents = [
+    "SessionStart",
+    "SessionEnd",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "Stop",
+    "StopFailure",
+    "SubagentStart",
+    "SubagentStop",
+    "PreCompact",
+    "PostCompact",
+    "Notification"
+  ]
 
   private static let cursorEvents = [
     "sessionStart",

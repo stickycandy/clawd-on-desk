@@ -142,6 +142,33 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(busyStopBody.string("event"), "PostToolUse")
   }
 
+  func testKimiRouteMapsExplicitPermissionAndSuspectMode() throws {
+    let explicit = Data(#"{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/repo","tool_name":"shell","requires_approval":true}"#.utf8)
+    let explicitRoute = NativeHookRuntime(agentId: "kimi-cli", event: "unknown", environment: [:]).route(stdin: explicit)
+    guard case .state(.object(let explicitBody)) = explicitRoute else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(explicitBody.string("agent_id"), "kimi-cli")
+    XCTAssertEqual(explicitBody.string("session_id"), "kimi-cli:s1")
+    XCTAssertEqual(explicitBody.string("state"), "notification")
+    XCTAssertEqual(explicitBody.string("event"), "PermissionRequest")
+    XCTAssertEqual(explicitBody.string("tool_name"), "shell")
+    XCTAssertEqual(explicitBody.string("cwd"), "/repo")
+
+    let suspect = Data(#"{"hook_event_name":"PreToolUse","session_id":"s2","tool_name":"write_file"}"#.utf8)
+    let suspectRoute = NativeHookRuntime(
+      agentId: "kimi-cli",
+      event: "unknown",
+      environment: ["CLAWD_KIMI_PERMISSION_MODE": "suspect"]
+    ).route(stdin: suspect)
+    guard case .state(.object(let suspectBody)) = suspectRoute else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(suspectBody.string("state"), "working")
+    XCTAssertEqual(suspectBody.string("event"), "PreToolUse")
+    XCTAssertEqual(suspectBody.bool("permission_suspect"), true)
+  }
+
   func testCursorRouteUsesHookEventPayloadWorkspaceAndDisplayHint() throws {
     let payload = Data(#"{"hook_event_name":"preToolUse","conversation_id":"c1","workspace_roots":["/repo"],"tool_name":"Shell"}"#.utf8)
     let route = NativeHookRuntime(agentId: "cursor-agent", event: "unknown", environment: [:]).route(stdin: payload)
