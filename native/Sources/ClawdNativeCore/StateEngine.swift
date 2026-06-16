@@ -176,13 +176,57 @@ public final class StateEngine: @unchecked Sendable {
     publish {
       let now = Date()
       let existing = sessionsById[sid]
+      let isSubagentStart = event == "SubagentStart" || event == "subagentStart"
+      let isSubagentStop = event == "SubagentStop" || event == "subagentStop"
       var recent = existing?.recentEvents ?? []
       if let event, !event.isEmpty {
         recent.append(event)
         if recent.count > 8 { recent.removeFirst(recent.count - 8) }
       }
       let startedAt = existing?.startedAt ?? now
-      let storedState = storedSessionStateLocked(incoming: state, existing: existing, metadata: metadata)
+      var storedState = storedSessionStateLocked(incoming: state, existing: existing, metadata: metadata)
+      var resumeState: ClawdState?
+
+      if isSubagentStop {
+        guard let existing else {
+          recomputeLocked(force: false)
+          return
+        }
+        if existing.state == .juggling {
+          if let resume = existing.resumeState {
+            sessionsById[sid] = AgentSession(
+              id: sid,
+              state: resume,
+              event: event,
+              updatedAt: now,
+              startedAt: existing.startedAt,
+              metadata: metadata,
+              recentEvents: recent
+            )
+          } else {
+            sessionsById.removeValue(forKey: sid)
+          }
+        } else {
+          sessionsById[sid] = AgentSession(
+            id: sid,
+            state: existing.state,
+            event: event,
+            updatedAt: now,
+            startedAt: existing.startedAt,
+            metadata: metadata,
+            recentEvents: recent
+          )
+        }
+        recomputeLocked(force: false)
+        return
+      }
+
+      if isSubagentStart {
+        resumeState = existing?.state == .juggling ? existing?.resumeState : existing?.state
+      } else if existing?.state == .juggling && state == .working {
+        storedState = .juggling
+        resumeState = existing?.resumeState
+      }
       if event == "SessionEnd" {
         let shouldPlaySweeping = state == .sweeping && existing?.metadata.headless != true
         sessionsById.removeValue(forKey: sid)
@@ -200,7 +244,8 @@ public final class StateEngine: @unchecked Sendable {
         updatedAt: now,
         startedAt: startedAt,
         metadata: metadata,
-        recentEvents: recent
+        recentEvents: recent,
+        resumeState: resumeState
       )
       if state == .sleeping || state == .miniSleep {
         sessionsById[sid]?.state = state

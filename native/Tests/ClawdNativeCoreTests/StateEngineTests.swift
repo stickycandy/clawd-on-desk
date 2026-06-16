@@ -80,6 +80,48 @@ final class StateEngineTests: XCTestCase {
     XCTAssertEqual(doneEngine.current(), .attention)
   }
 
+  func testJugglingIgnoresWorkingUpdatesUntilSubagentStop() {
+    let engine = StateEngine()
+    engine.updateSession("s1", state: .juggling, event: "SubagentStart")
+    XCTAssertEqual(engine.snapshot().sessions.first?.state, .juggling)
+
+    engine.updateSession("s1", state: .working, event: "PostToolUse")
+
+    XCTAssertEqual(engine.snapshot().sessions.first?.state, .juggling)
+    XCTAssertEqual(engine.current(), .juggling)
+  }
+
+  func testSubagentStopRestoresPriorSessionState() {
+    let engine = StateEngine()
+    engine.updateSession("s1", state: .working, event: "PreToolUse")
+    engine.updateSession("s1", state: .juggling, event: "SubagentStart")
+    engine.updateSession("s1", state: .working, event: "SubagentStop")
+
+    let session = engine.snapshot().sessions.first { $0.id == "s1" }
+    XCTAssertEqual(session?.state, .working)
+    XCTAssertEqual(session?.event, "SubagentStop")
+    XCTAssertEqual(engine.current(), .working)
+  }
+
+  func testSubagentOnlySessionIsRemovedOnSubagentStop() {
+    let engine = StateEngine()
+    engine.updateSession("s1", state: .juggling, event: "SubagentStart")
+    XCTAssertNotNil(engine.snapshot().sessions.first { $0.id == "s1" })
+
+    engine.updateSession("s1", state: .working, event: "SubagentStop")
+
+    XCTAssertNil(engine.snapshot().sessions.first { $0.id == "s1" })
+    XCTAssertEqual(engine.current(), .idle)
+  }
+
+  func testLateSubagentStopWithoutTrackedSessionIsIgnored() {
+    let engine = StateEngine()
+    engine.updateSession("ghost", state: .working, event: "SubagentStop")
+
+    XCTAssertTrue(engine.snapshot().sessions.isEmpty)
+    XCTAssertEqual(engine.current(), .idle)
+  }
+
   func testSessionEndDeletesSessionAndRecomputesDisplayState() {
     let engine = StateEngine(timings: StateTiming(minDisplayMs: [:]))
     engine.updateSession("s1", state: .working, event: "PreToolUse")

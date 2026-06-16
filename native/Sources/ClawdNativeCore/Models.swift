@@ -195,6 +195,7 @@ public struct AgentSession: Codable, Identifiable, Equatable, Sendable {
   public var startedAt: Date
   public var metadata: SessionMetadata
   public var recentEvents: [String]
+  public var resumeState: ClawdState?
 
   public init(
     id: String,
@@ -203,7 +204,8 @@ public struct AgentSession: Codable, Identifiable, Equatable, Sendable {
     updatedAt: Date,
     startedAt: Date,
     metadata: SessionMetadata,
-    recentEvents: [String] = []
+    recentEvents: [String] = [],
+    resumeState: ClawdState? = nil
   ) {
     self.id = id
     self.state = state
@@ -212,6 +214,7 @@ public struct AgentSession: Codable, Identifiable, Equatable, Sendable {
     self.startedAt = startedAt
     self.metadata = metadata
     self.recentEvents = recentEvents
+    self.resumeState = resumeState
   }
 
   public var visibleInHUD: Bool {
