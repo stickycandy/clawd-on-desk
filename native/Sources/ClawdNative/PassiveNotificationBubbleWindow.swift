@@ -22,6 +22,9 @@ final class PassiveNotificationBubbleWindowController: NSWindowController, NSWin
     controller.refresh(request, preferences: preferences, petWindow: petWindow)
     controller.showWindow(nil)
     controller.window?.orderFrontRegardless()
+    if let window = controller.window {
+      FloatingWindowPolicy.applyPersistentOverlay(to: window)
+    }
     reposition(preferences: preferences, petWindow: petWindow)
   }
 

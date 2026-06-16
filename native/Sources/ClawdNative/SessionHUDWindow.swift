@@ -150,6 +150,9 @@ final class SessionHUDWindowController: NSWindowController {
     }
     reposition()
     window?.orderFrontRegardless()
+    if let window {
+      FloatingWindowPolicy.applyPersistentOverlay(to: window)
+    }
     syncAutoHidePollLifecycle(preferences: prefs, evaluateImmediately: true)
     frameDidChange?()
   }

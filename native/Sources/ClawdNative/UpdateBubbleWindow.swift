@@ -64,6 +64,9 @@ final class UpdateBubbleWindowController: NSWindowController, NSWindowDelegate {
     resizeAndPosition(preferences: preferences, reservedHeight: reservedHeight, hudReservedOffset: hudReservedOffset)
     showWindow(nil)
     window?.orderFrontRegardless()
+    if let window {
+      FloatingWindowPolicy.applyPersistentOverlay(to: window)
+    }
 
     let seconds = preferences.updateBubbleAutoCloseSeconds
     if seconds > 0 {

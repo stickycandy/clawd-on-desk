@@ -132,6 +132,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     petWindow?.showWindow(nil)
+    if let window = petWindow?.window {
+      FloatingWindowPolicy.applyPersistentOverlay(to: window)
+    }
     shortcutRuntime?.start()
     systemBehaviorRuntime?.start()
     idleSleepRuntime?.start()

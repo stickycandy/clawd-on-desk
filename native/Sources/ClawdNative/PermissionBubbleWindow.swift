@@ -22,6 +22,9 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     visible.append(controller)
     controller.showWindow(nil)
     controller.window?.makeKeyAndOrderFront(nil)
+    if let window = controller.window {
+      FloatingWindowPolicy.applyPersistentOverlay(to: window)
+    }
     controller.armAutoClose(preferences: preferences)
     reposition(preferences: preferences, petWindow: petWindow)
   }
