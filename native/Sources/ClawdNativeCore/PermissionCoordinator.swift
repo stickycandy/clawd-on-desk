@@ -143,6 +143,17 @@ public final class PermissionCoordinator: @unchecked Sendable {
     values.forEach { $0.resolve(decision) }
   }
 
+  public func cancelAll(agentId: String, with decision: PermissionDecision = .noDecision) {
+    let values: [PendingPermission]
+    lock.lock()
+    values = pending.values.filter { $0.request.agentId == agentId }
+    for value in values {
+      pending.removeValue(forKey: value.id)
+    }
+    lock.unlock()
+    values.forEach { $0.resolve(decision) }
+  }
+
   public func resolveLatest(_ decision: PermissionDecision) -> Bool {
     let latest: PendingPermission?
     lock.lock()

@@ -2,6 +2,24 @@ import XCTest
 @testable import ClawdNativeCore
 
 final class PermissionResponseTests: XCTestCase {
+  func testPermissionCoordinatorCancelsOnlyMatchingAgent() {
+    let coordinator = PermissionCoordinator()
+    var resolved: [(String, PermissionDecision)] = []
+    _ = coordinator.enqueue(PermissionRequest(agentId: "codex", toolName: "Bash")) { decision in
+      resolved.append(("codex", decision))
+    }
+    _ = coordinator.enqueue(PermissionRequest(agentId: "qwen-code", toolName: "Write")) { decision in
+      resolved.append(("qwen-code", decision))
+    }
+
+    coordinator.cancelAll(agentId: "codex", with: .noDecision)
+
+    XCTAssertEqual(resolved.count, 1)
+    XCTAssertEqual(resolved.first?.0, "codex")
+    XCTAssertEqual(resolved.first?.1, .noDecision)
+    XCTAssertEqual(coordinator.pendingPermissions().map(\.request.agentId), ["qwen-code"])
+  }
+
   func testAllowResponseUsesHookSpecificOutputEnvelope() throws {
     let data = try XCTUnwrap(PermissionResponseBuilder.body(for: .allow))
     let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]

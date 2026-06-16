@@ -48,6 +48,7 @@ final class SettingsWindowController: NSWindowController {
   private let remoteSSHRuntime: RemoteSSHRuntime
   private let projectRoot: URL
   private let localPort: () -> Int?
+  private let agentCleanupHandler: (String) -> Void
   private lazy var integrationManager = IntegrationManager(projectRoot: projectRoot)
   private let stack = NSStackView()
   private let documentView = SettingsDocumentView()
@@ -60,12 +61,14 @@ final class SettingsWindowController: NSWindowController {
     preferencesStore: PreferencesStore,
     remoteSSHRuntime: RemoteSSHRuntime,
     projectRoot: URL,
-    localPort: @escaping () -> Int?
+    localPort: @escaping () -> Int?,
+    agentCleanupHandler: @escaping (String) -> Void = { _ in }
   ) {
     self.preferencesStore = preferencesStore
     self.remoteSSHRuntime = remoteSSHRuntime
     self.projectRoot = projectRoot
     self.localPort = localPort
+    self.agentCleanupHandler = agentCleanupHandler
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 680, height: 760),
       styleMask: [.titled, .closable, .resizable],
@@ -843,10 +846,14 @@ final class SettingsWindowController: NSWindowController {
 
   @objc private func toggleAgent(_ sender: NSButton) {
     guard let agentId = sender.identifier?.rawValue else { return }
+    let enabled = sender.state == .on
     _ = try? preferencesStore.update { prefs in
       var entry = prefs.agents[agentId] ?? AgentSettings()
-      entry.enabled = sender.state == .on
+      entry.enabled = enabled
       prefs.agents[agentId] = entry
+    }
+    if !enabled {
+      agentCleanupHandler(agentId)
     }
   }
 
@@ -877,7 +884,8 @@ final class SettingsWindowController: NSWindowController {
     let manager = integrationManager
     DispatchQueue.global(qos: .utility).async { [weak self, preferencesStore] in
       let result = manager.uninstall(agentId: agentId)
-      if result.status == "ok" {
+      let shouldCleanup = result.status == "ok"
+      if shouldCleanup {
         _ = try? preferencesStore.update { prefs in
           var entry = prefs.agents[agentId] ?? AgentSettings()
           entry.integrationInstalled = false
@@ -886,6 +894,9 @@ final class SettingsWindowController: NSWindowController {
         }
       }
       Task { @MainActor in
+        if shouldCleanup {
+          self?.agentCleanupHandler(agentId)
+        }
         sender.isEnabled = true
         self?.showAlert("Uninstall \(agentId): \(result.status)\n\(result.output)")
       }

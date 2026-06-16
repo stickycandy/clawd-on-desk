@@ -80,7 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       preferencesStore: preferencesStore,
       remoteSSHRuntime: remoteSSHRuntime,
       projectRoot: projectRoot,
-      localPort: { [weak self] in self?.server?.port }
+      localPort: { [weak self] in self?.server?.port },
+      agentCleanupHandler: { [weak self] agentId in
+        self?.clearAgentRuntime(agentId: agentId)
+      }
     )
     statusMenu = StatusMenuController(
       stateEngine: stateEngine,
@@ -241,6 +244,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case .clear(let agentId, let sessionId, let reason):
       PassiveNotificationBubbleWindowController.clear(agentId: agentId, sessionId: sessionId, reason: reason)
     }
+  }
+
+  private func clearAgentRuntime(agentId: String) {
+    stateEngine.clearSessions(agentId: agentId)
+    permissionCoordinator.cancelAll(agentId: agentId, with: .noDecision)
+    PermissionBubbleWindowController.dismiss(agentId: agentId)
+    PassiveNotificationBubbleWindowController.clear(agentId: agentId, sessionId: nil, reason: "agent-disabled")
   }
 
   private func syncIntegrations() {

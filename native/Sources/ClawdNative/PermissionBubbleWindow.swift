@@ -61,6 +61,15 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     }
   }
 
+  static func dismiss(agentId: String) {
+    let controllers = visible.filter { $0.permission?.request.agentId == agentId }
+    for controller in controllers {
+      controller.resolved = true
+      controller.permission?.resolve(.noDecision)
+      controller.close()
+    }
+  }
+
   init(permission: PendingPermission) {
     self.permission = permission
     let window = NSPanel(
