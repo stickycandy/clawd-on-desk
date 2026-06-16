@@ -55,6 +55,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "copilot-cli",
     "cursor-agent",
     "gemini-cli",
+    "kiro-cli",
     "codewhale",
     "qwen-code",
     "qoder",
@@ -98,6 +99,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installCursor()
       case "gemini-cli":
         return try installGemini()
+      case "kiro-cli":
+        return try installKiro()
       case "codewhale":
         return try installCodewhale()
       case "reasonix":
@@ -133,6 +136,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallCursor()
       case "gemini-cli":
         return try uninstallGemini()
+      case "kiro-cli":
+        return try uninstallKiro()
       case "codewhale":
         return try uninstallCodewhale()
       case "reasonix":
@@ -479,6 +484,61 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       action: "uninstall",
       status: "ok",
       message: "Swift Cursor hooks removed from \(hooksPath.path)",
+      removed: counters.removed
+    )
+  }
+
+  private func installKiro() throws -> NativeIntegrationSummary {
+    let agentsDir = homeDirectory.appendingPathComponent(".kiro/agents", isDirectory: true)
+    guard fileManager.fileExists(atPath: agentsDir.path) else {
+      return .init(agentId: "kiro-cli", action: "install", status: "skip", message: "\(agentsDir.path) not found")
+    }
+    var counters = ChangeCounters()
+    var processed = 0
+    for url in try kiroAgentConfigFiles(in: agentsDir) {
+      if url.lastPathComponent == "clawd.json" { continue }
+      let result = try syncKiroAgentFile(url)
+      counters.merge(result)
+      processed += 1
+    }
+    let clawdURL = agentsDir.appendingPathComponent("clawd.json")
+    let clawdResult = try syncKiroAgentFile(clawdURL, createMinimal: true)
+    counters.merge(clawdResult)
+    processed += 1
+    return NativeIntegrationSummary(
+      agentId: "kiro-cli",
+      action: "install",
+      status: "ok",
+      message: "Swift Kiro hooks -> \(agentsDir.path) (\(processed) agent config(s))",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      removed: counters.removed
+    )
+  }
+
+  private func uninstallKiro() throws -> NativeIntegrationSummary {
+    let agentsDir = homeDirectory.appendingPathComponent(".kiro/agents", isDirectory: true)
+    guard fileManager.fileExists(atPath: agentsDir.path) else {
+      return .init(agentId: "kiro-cli", action: "uninstall", status: "ok", message: "\(agentsDir.path) not found")
+    }
+    var counters = ChangeCounters()
+    for url in try kiroAgentConfigFiles(in: agentsDir) {
+      var settings = try readJSONObject(url, missingIsEmpty: false)
+      var fileCounters = ChangeCounters()
+      for event in Self.kiroEvents {
+        fileCounters.merge(removeWholeHookEntries(settings: &settings, event: event, marker: "kiro-hook.js"))
+      }
+      if fileCounters.removed > 0 {
+        try writeJSONObject(settings, to: url, backup: true)
+      }
+      counters.merge(fileCounters)
+    }
+    return NativeIntegrationSummary(
+      agentId: "kiro-cli",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Kiro hooks removed from \(agentsDir.path)",
       removed: counters.removed
     )
   }
@@ -1330,6 +1390,53 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return base + "\n"
   }
 
+  private func kiroAgentConfigFiles(in agentsDir: URL) throws -> [URL] {
+    let entries = try fileManager.contentsOfDirectory(at: agentsDir, includingPropertiesForKeys: nil)
+    return entries
+      .filter { url in
+        let name = url.lastPathComponent
+        return name.hasSuffix(".json") && !name.contains(".example") && name != "kiro_default.json"
+      }
+      .sorted { $0.lastPathComponent < $1.lastPathComponent }
+  }
+
+  private func syncKiroAgentFile(_ url: URL, createMinimal: Bool = false) throws -> ChangeCounters {
+    let existed = fileManager.fileExists(atPath: url.path)
+    var settings = try readJSONObject(url)
+    var counters = ChangeCounters()
+    var changed = false
+    let baseName = url.deletingPathExtension().lastPathComponent
+    if settings["name"] == nil {
+      settings["name"] = baseName
+      changed = true
+    }
+    if createMinimal, !existed, settings["description"] == nil {
+      settings["description"] = "Clawd desktop pet hook integration"
+      changed = true
+    }
+    let nodeBin = resolveNodeBin(existingSettings: settings, marker: "kiro-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/kiro-hook.js").path
+    for event in Self.kiroEvents {
+      let desiredEntry: [String: Any] = [
+        "command": hookCommand(agentId: "kiro-cli", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "kiro-hook.js")
+      ]
+      let before = counters
+      counters.merge(syncWholeHookEntry(
+        settings: &settings,
+        event: event,
+        marker: "kiro-hook.js",
+        desiredEntry: desiredEntry
+      ))
+      if counters.added != before.added || counters.updated != before.updated || counters.removed != before.removed {
+        changed = true
+      }
+    }
+    if changed {
+      try writeJSONObject(settings, to: url)
+    }
+    return counters
+  }
+
   private func supportedClaudeVersionedEvents() -> (events: [String], warning: String?) {
     guard let version = detectClaudeVersion() else {
       return ([], "Claude Code version could not be detected; versioned hooks skipped.")
@@ -1539,6 +1646,14 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "subagentStop",
     "preCompact",
     "afterAgentThought",
+    "stop"
+  ]
+
+  private static let kiroEvents = [
+    "agentSpawn",
+    "userPromptSubmit",
+    "preToolUse",
+    "postToolUse",
     "stop"
   ]
 

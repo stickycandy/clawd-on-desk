@@ -33,6 +33,8 @@ public struct NativeHookRuntime {
       return geminiRoute(payload: object)
     case "cursor-agent":
       return cursorRoute(payload: object)
+    case "kiro-cli":
+      return kiroRoute(payload: object)
     case "codewhale":
       return codewhaleRoute(payload: object)
     case "reasonix":
@@ -310,6 +312,18 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func kiroRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("hook_event_name") ?? event
+    guard let mapped = Self.kiroState[hookEvent] else { return .none }
+    return .state(.object(baseState(
+      state: mapped.state,
+      sessionId: "default",
+      event: mapped.event,
+      agentId: "kiro-cli",
+      payload: payload
+    )))
+  }
+
   private func codewhaleRoute(payload: [String: JSONValue]) -> Route {
     let hookEvent = payload.string("event") ?? event
     guard var mapped = Self.codewhaleState[hookEvent] else { return .none }
@@ -466,6 +480,8 @@ public struct NativeHookRuntime {
       return ["gemini"]
     case "cursor-agent":
       return ["cursor", "Cursor"]
+    case "kiro-cli":
+      return ["kiro-cli"]
     case "codewhale":
       return ["codewhale"]
     case "reasonix":
@@ -1124,6 +1140,14 @@ public struct NativeHookRuntime {
     "subagentStop": ("working", "SubagentStop"),
     "preCompact": ("sweeping", "PreCompact"),
     "afterAgentThought": ("thinking", "AfterAgentThought")
+  ]
+
+  private static let kiroState: [String: (state: String, event: String)] = [
+    "agentSpawn": ("idle", "agentSpawn"),
+    "userPromptSubmit": ("thinking", "userPromptSubmit"),
+    "preToolUse": ("working", "preToolUse"),
+    "postToolUse": ("working", "postToolUse"),
+    "stop": ("attention", "stop")
   ]
 
   private static let codewhaleState: [String: (state: String, event: String)] = [

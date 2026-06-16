@@ -188,6 +188,67 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertFalse(String(describing: uninstalled).contains("cursor-hook.js"))
   }
 
+  func testKiroInstallerCreatesClawdAgentAndSkipsBuiltinDefault() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "name": "custom",
+      "hooks": [
+        "preToolUse": [
+          [
+            "command": "echo user"
+          ],
+          [
+            "command": "node /old/kiro-hook.js"
+          ]
+        ]
+      ]
+    ], to: ".kiro/agents/custom.json")
+    try fixture.writeJSON([
+      "name": "kiro_default",
+      "hooks": [
+        "preToolUse": [
+          [
+            "command": "echo builtin"
+          ]
+        ]
+      ]
+    ], to: ".kiro/agents/kiro_default.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "kiro-cli", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+
+    let custom = try fixture.readJSON(".kiro/agents/custom.json")
+    let customHooks = try XCTUnwrap(custom["hooks"] as? [String: Any])
+    let customPreTool = try XCTUnwrap(customHooks["preToolUse"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: customPreTool).contains("echo user"))
+    XCTAssertFalse(String(describing: customPreTool).contains("/old/kiro-hook.js"))
+    XCTAssertTrue(String(describing: customPreTool).contains(#""/opt/homebrew/bin/node" "\#(fixture.projectRoot.path)/hooks/kiro-hook.js" "preToolUse""#))
+    XCTAssertEqual(String(describing: custom).components(separatedBy: "kiro-hook.js").count - 1, 5)
+
+    let clawd = try fixture.readJSON(".kiro/agents/clawd.json")
+    XCTAssertEqual(clawd["name"] as? String, "clawd")
+    XCTAssertEqual(clawd["description"] as? String, "Clawd desktop pet hook integration")
+    XCTAssertEqual(String(describing: clawd).components(separatedBy: "kiro-hook.js").count - 1, 5)
+
+    let builtin = try fixture.readJSON(".kiro/agents/kiro_default.json")
+    XCTAssertTrue(String(describing: builtin).contains("echo builtin"))
+    XCTAssertFalse(String(describing: builtin).contains("kiro-hook.js"))
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "kiro-cli"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 10)
+    let uninstalledCustom = try fixture.readJSON(".kiro/agents/custom.json")
+    XCTAssertTrue(String(describing: uninstalledCustom).contains("echo user"))
+    XCTAssertFalse(String(describing: uninstalledCustom).contains("kiro-hook.js"))
+    let uninstalledClawd = try fixture.readJSON(".kiro/agents/clawd.json")
+    XCTAssertFalse(String(describing: uninstalledClawd).contains("kiro-hook.js"))
+  }
+
   func testCodewhaleInstallerPreservesUserHooksAndUninstallsManagedSections() throws {
     let fixture = try Fixture()
     try fixture.writeText("""

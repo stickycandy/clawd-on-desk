@@ -136,6 +136,19 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(body.string("event"), "StopFailure")
   }
 
+  func testKiroRouteUsesDefaultSessionAndCamelCaseEvent() throws {
+    let payload = Data(#"{"hook_event_name":"preToolUse","cwd":"/repo"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "kiro-cli", event: "unknown", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "kiro-cli")
+    XCTAssertEqual(body.string("session_id"), "default")
+    XCTAssertEqual(body.string("state"), "working")
+    XCTAssertEqual(body.string("event"), "preToolUse")
+    XCTAssertEqual(body.string("cwd"), "/repo")
+  }
+
   func testCodewhaleBuildsPayloadFromEnvironmentAndCache() throws {
     let fixture = try HookFixture()
     let cache = fixture.root.appendingPathComponent("codewhale-session-cache")
