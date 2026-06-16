@@ -22,7 +22,8 @@ struct ClawdNativeHookMain {
       if delay > 0 {
         Thread.sleep(forTimeInterval: delay)
       }
-      post(path: "/state", body: body, timeout: 0.2) { _ in }
+      let timeout = NativeHookRuntime.statePostTimeout(agentId: agentId, event: event, stdin: input)
+      post(path: "/state", body: body, timeout: timeout) { _ in }
       exit(0)
     case .permission(let body):
       let response = post(path: "/permission", body: body, timeout: permissionTimeout(agentId: agentId))

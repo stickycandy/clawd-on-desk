@@ -31,6 +31,8 @@ public struct NativeHookRuntime {
       return copilotRoute(payload: object)
     case "gemini-cli":
       return geminiRoute(payload: object)
+    case "codewhale":
+      return codewhaleRoute(payload: object)
     case "reasonix":
       return reasonixRoute(payload: object)
     case "qoder":
@@ -92,6 +94,11 @@ public struct NativeHookRuntime {
       hookEvent = payloadEvent
     }
     return hookEvent == "Stop" ? 0.2 : 0
+  }
+
+  public static func statePostTimeout(agentId: String, event: String, stdin: Data? = nil) -> TimeInterval {
+    guard agentId == "codewhale" else { return 0.2 }
+    return event == "session_end" ? 2 : 0.2
   }
 
   private func claudeRoute(payload: [String: JSONValue]) -> Route {
@@ -274,6 +281,48 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func codewhaleRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("event") ?? event
+    guard var mapped = Self.codewhaleState[hookEvent] else { return .none }
+    if hookEvent == "tool_call_after", codewhaleBool("DEEPSEEK_TOOL_SUCCESS") == false {
+      mapped = (state: "error", event: "PostToolUseFailure")
+    } else if hookEvent == "mode_change" {
+      let mode = codewhaleEnv("DEEPSEEK_MODE")?.lowercased() ?? ""
+      let previous = codewhaleEnv("DEEPSEEK_PREVIOUS_MODE")?.lowercased() ?? ""
+      if mode != "compact", previous != "compact" {
+        mapped = (state: "attention", event: "Notification")
+      }
+    }
+
+    let sessionId = codewhaleSessionId()
+    var sharedPayload: [String: JSONValue] = [:]
+    if let cwd = codewhaleEnv("DEEPSEEK_WORKSPACE") {
+      sharedPayload["cwd"] = .string(cwd)
+    }
+    if let model = codewhaleEnv("DEEPSEEK_MODEL") {
+      sharedPayload["model"] = .string(model)
+    }
+    var body = baseState(
+      state: mapped.state,
+      sessionId: normalizeSessionId(sessionId, prefix: "codewhale"),
+      event: mapped.event,
+      agentId: "codewhale",
+      payload: sharedPayload
+    )
+    body["hook_source"] = .string("codewhale-hook")
+    body["session_title"] = .string("CodeWhale")
+    if let toolName = codewhaleEnv("DEEPSEEK_TOOL_NAME") {
+      body["tool_name"] = .string(toolName)
+    }
+    if let error = codewhaleEnv("DEEPSEEK_ERROR") {
+      body["error_message"] = .string(error)
+    }
+    if hookEvent == "session_end" {
+      clearCodewhaleCachedSessionId()
+    }
+    return .state(.object(body))
+  }
+
   private func reasonixRoute(payload: [String: JSONValue]) -> Route {
     let hookEvent = payload.string("event") ?? event
     guard let state = Self.reasonixState[hookEvent] else { return .none }
@@ -386,6 +435,8 @@ public struct NativeHookRuntime {
       return ["copilot"]
     case "gemini-cli":
       return ["gemini"]
+    case "codewhale":
+      return ["codewhale"]
     case "reasonix":
       return ["reasonix"]
     case "qoder":
@@ -536,6 +587,57 @@ public struct NativeHookRuntime {
       return "subagent"
     }
     return nil
+  }
+
+  private func codewhaleSessionId() -> String {
+    if let explicit = codewhaleEnv("DEEPSEEK_SESSION_ID") {
+      writeCodewhaleCachedSessionId(explicit)
+      return explicit
+    }
+    if let cached = readCodewhaleCachedSessionId() {
+      writeCodewhaleCachedSessionId(cached)
+      return cached
+    }
+    let generated = "sess_\(Int(Date().timeIntervalSince1970 * 1000))"
+    writeCodewhaleCachedSessionId(generated)
+    return generated
+  }
+
+  private func codewhaleEnv(_ key: String) -> String? {
+    let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return value.isEmpty ? nil : value
+  }
+
+  private func codewhaleBool(_ key: String) -> Bool? {
+    switch codewhaleEnv(key) {
+    case "true":
+      return true
+    case "false":
+      return false
+    default:
+      return nil
+    }
+  }
+
+  private func codewhaleSessionCacheURL() -> URL {
+    if let explicit = codewhaleEnv("CLAWD_CODEWHALE_SESSION_CACHE") {
+      return URL(fileURLWithPath: explicit)
+    }
+    return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("codewhale-hook-session")
+  }
+
+  private func readCodewhaleCachedSessionId() -> String? {
+    let value = (try? String(contentsOf: codewhaleSessionCacheURL(), encoding: .utf8))?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return value.isEmpty ? nil : value
+  }
+
+  private func writeCodewhaleCachedSessionId(_ value: String) {
+    try? value.write(to: codewhaleSessionCacheURL(), atomically: true, encoding: .utf8)
+  }
+
+  private func clearCodewhaleCachedSessionId() {
+    try? FileManager.default.removeItem(at: codewhaleSessionCacheURL())
   }
 
   private func codexParentRole(_ object: [String: JSONValue]) -> String? {
@@ -954,6 +1056,16 @@ public struct NativeHookRuntime {
     "AfterAgent": ("idle", "AfterAgent", false),
     "Notification": ("notification", "Notification", false),
     "PreCompress": ("idle", "PreCompress", true)
+  ]
+
+  private static let codewhaleState: [String: (state: String, event: String)] = [
+    "session_start": ("idle", "SessionStart"),
+    "session_end": ("sleeping", "SessionEnd"),
+    "message_submit": ("thinking", "UserPromptSubmit"),
+    "tool_call_before": ("working", "PreToolUse"),
+    "tool_call_after": ("working", "PostToolUse"),
+    "mode_change": ("sweeping", "PreCompact"),
+    "on_error": ("error", "StopFailure")
   ]
 
   private static let reasonixState = [

@@ -109,6 +109,79 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(NativeHookRuntime.stdout(agentId: "gemini-cli", event: "AfterTool"), #"{"decision":"allow"}"#)
   }
 
+  func testCodewhaleBuildsPayloadFromEnvironmentAndCache() throws {
+    let fixture = try HookFixture()
+    let cache = fixture.root.appendingPathComponent("codewhale-session-cache")
+    let route = NativeHookRuntime(
+      agentId: "codewhale",
+      event: "tool_call_before",
+      environment: [
+        "CLAWD_CODEWHALE_SESSION_CACHE": cache.path,
+        "DEEPSEEK_SESSION_ID": "sess-1",
+        "DEEPSEEK_WORKSPACE": "/repo",
+        "DEEPSEEK_MODEL": "deepseek-chat",
+        "DEEPSEEK_TOOL_NAME": "Edit"
+      ]
+    ).route(stdin: Data())
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "codewhale")
+    XCTAssertEqual(body.string("hook_source"), "codewhale-hook")
+    XCTAssertEqual(body.string("session_id"), "codewhale:sess-1")
+    XCTAssertEqual(body.string("state"), "working")
+    XCTAssertEqual(body.string("event"), "PreToolUse")
+    XCTAssertEqual(body.string("cwd"), "/repo")
+    XCTAssertEqual(body.string("model"), "deepseek-chat")
+    XCTAssertEqual(body.string("tool_name"), "Edit")
+    XCTAssertEqual(body.string("session_title"), "CodeWhale")
+
+    let cachedRoute = NativeHookRuntime(
+      agentId: "codewhale",
+      event: "mode_change",
+      environment: [
+        "CLAWD_CODEWHALE_SESSION_CACHE": cache.path,
+        "DEEPSEEK_MODE": "agent",
+        "DEEPSEEK_PREVIOUS_MODE": "plan"
+      ]
+    ).route(stdin: Data())
+    guard case .state(.object(let cachedBody)) = cachedRoute else {
+      return XCTFail("expected cached state route")
+    }
+    XCTAssertEqual(cachedBody.string("session_id"), "codewhale:sess-1")
+    XCTAssertEqual(cachedBody.string("state"), "attention")
+    XCTAssertEqual(cachedBody.string("event"), "Notification")
+  }
+
+  func testCodewhaleFailureAndSessionEndPolicy() throws {
+    let fixture = try HookFixture()
+    let cache = fixture.root.appendingPathComponent("codewhale-session-cache")
+    let route = NativeHookRuntime(
+      agentId: "codewhale",
+      event: "tool_call_after",
+      environment: [
+        "CLAWD_CODEWHALE_SESSION_CACHE": cache.path,
+        "DEEPSEEK_SESSION_ID": "sess-2",
+        "DEEPSEEK_TOOL_SUCCESS": "false",
+        "DEEPSEEK_ERROR": "failed"
+      ]
+    ).route(stdin: Data())
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("state"), "error")
+    XCTAssertEqual(body.string("event"), "PostToolUseFailure")
+    XCTAssertEqual(body.string("error_message"), "failed")
+    XCTAssertEqual(NativeHookRuntime.statePostTimeout(agentId: "codewhale", event: "session_end"), 2)
+
+    _ = NativeHookRuntime(
+      agentId: "codewhale",
+      event: "session_end",
+      environment: ["CLAWD_CODEWHALE_SESSION_CACHE": cache.path]
+    ).route(stdin: Data())
+    XCTAssertFalse(FileManager.default.fileExists(atPath: cache.path))
+  }
+
   func testReasonixUsesPayloadEventAndToolName() throws {
     let payload = Data(#"{"event":"PreToolUse","session_id":"s1","cwd":"/repo","toolName":"Read"}"#.utf8)
     let route = NativeHookRuntime(agentId: "reasonix", event: "unknown", environment: [:]).route(stdin: payload)

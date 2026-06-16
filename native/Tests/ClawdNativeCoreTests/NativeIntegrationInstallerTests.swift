@@ -143,6 +143,50 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertTrue(String(describing: preCompress).contains("PreCompress"))
   }
 
+  func testCodewhaleInstallerPreservesUserHooksAndUninstallsManagedSections() throws {
+    let fixture = try Fixture()
+    try fixture.writeText("""
+    [hooks]
+    enabled = false
+
+    [[hooks.hooks]]
+    event = "session_start"
+    command = '''echo user'''
+
+    [[hooks.hooks]]
+    # managed by clawd-on-desk
+    event = "message_submit"
+    command = '''node /old/codewhale-hook.js message_submit'''
+    background = true
+    timeout_secs = 5
+    """, to: ".codewhale/config.toml")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "codewhale", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+
+    let installed = try fixture.readText(".codewhale/config.toml")
+    XCTAssertTrue(installed.contains("enabled = true"))
+    XCTAssertTrue(installed.contains("echo user"))
+    XCTAssertFalse(installed.contains("/old/codewhale-hook.js"))
+    XCTAssertEqual(installed.components(separatedBy: "codewhale-hook.js").count - 1, 7)
+    XCTAssertTrue(installed.contains(#"event = "session_end""#))
+    XCTAssertTrue(installed.contains("timeout_secs = 30"))
+    XCTAssertTrue(installed.contains("continue_on_error = true"))
+    XCTAssertTrue(installed.contains(#""/opt/homebrew/bin/node" "\#(fixture.projectRoot.path)/hooks/codewhale-hook.js" "session_start""#))
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "codewhale"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 7)
+    let uninstalled = try fixture.readText(".codewhale/config.toml")
+    XCTAssertTrue(uninstalled.contains("echo user"))
+    XCTAssertFalse(uninstalled.contains("codewhale-hook.js"))
+  }
+
   func testReasonixInstallerPreservesUserHooksAndReplacesManagedEntry() throws {
     let fixture = try Fixture()
     try fixture.writeJSON([
@@ -281,5 +325,15 @@ private final class Fixture {
   func readJSON(_ relativePath: String) throws -> [String: Any] {
     let data = try Data(contentsOf: home.appendingPathComponent(relativePath))
     return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+  }
+
+  func writeText(_ text: String, to relativePath: String) throws {
+    let url = home.appendingPathComponent(relativePath)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try text.write(to: url, atomically: true, encoding: .utf8)
+  }
+
+  func readText(_ relativePath: String) throws -> String {
+    try String(contentsOf: home.appendingPathComponent(relativePath), encoding: .utf8)
   }
 }

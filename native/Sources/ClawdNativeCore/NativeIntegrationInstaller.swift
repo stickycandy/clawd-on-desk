@@ -54,6 +54,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "codex",
     "copilot-cli",
     "gemini-cli",
+    "codewhale",
     "qwen-code",
     "qoder",
     "reasonix"
@@ -94,6 +95,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installCopilot()
       case "gemini-cli":
         return try installGemini()
+      case "codewhale":
+        return try installCodewhale()
       case "reasonix":
         return try installReasonix()
       case "qoder":
@@ -125,6 +128,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallCopilot()
       case "gemini-cli":
         return try uninstallGemini()
+      case "codewhale":
+        return try uninstallCodewhale()
       case "reasonix":
         return try uninstallReasonix()
       case "qoder":
@@ -418,6 +423,55 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       status: "ok",
       message: "Swift Gemini hooks removed from \(settingsPath.path)",
       removed: counters.removed
+    )
+  }
+
+  private func installCodewhale() throws -> NativeIntegrationSummary {
+    let resolved = resolveCodewhaleConfigPath()
+    let configPath = resolved.url
+    let configDir = configPath.deletingLastPathComponent()
+    guard resolved.explicit || fileManager.fileExists(atPath: configDir.path) else {
+      return .init(agentId: "codewhale", action: "install", status: "skip", message: "\(configDir.path) not found")
+    }
+    let original = (try? String(contentsOf: configPath, encoding: .utf8)) ?? ""
+    let nodeBin = resolveNodeBin(existingSettings: ["content": original], marker: "codewhale-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/codewhale-hook.js").path
+    let result = buildCodewhaleConfig(original: original, nodeBin: nodeBin, hookScript: hookScript)
+    if result.text != original {
+      try writeText(result.text, to: configPath)
+    }
+    return NativeIntegrationSummary(
+      agentId: "codewhale",
+      action: "install",
+      status: "ok",
+      message: "Swift CodeWhale hooks -> \(configPath.path)",
+      added: result.counters.added,
+      updated: result.counters.updated,
+      skipped: result.counters.skipped,
+      removed: result.counters.removed
+    )
+  }
+
+  private func uninstallCodewhale() throws -> NativeIntegrationSummary {
+    let configPath = resolveCodewhaleConfigPath().url
+    guard let original = try? String(contentsOf: configPath, encoding: .utf8) else {
+      return NativeIntegrationSummary(
+        agentId: "codewhale",
+        action: "uninstall",
+        status: "ok",
+        message: "Swift CodeWhale config not found: \(configPath.path)"
+      )
+    }
+    let stripped = removeCodewhaleManagedHookSections(from: original)
+    if stripped.removed > 0 {
+      try writeText(stripped.text, to: configPath)
+    }
+    return NativeIntegrationSummary(
+      agentId: "codewhale",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift CodeWhale hooks removed from \(configPath.path)",
+      removed: stripped.removed
     )
   }
 
@@ -1056,6 +1110,169 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return homeDirectory.appendingPathComponent(".copilot", isDirectory: true)
   }
 
+  private func resolveCodewhaleConfigPath() -> (url: URL, explicit: Bool) {
+    for key in ["CODEWHALE_CONFIG_PATH", "DEEPSEEK_CONFIG_PATH"] {
+      if let explicit = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
+        return (URL(fileURLWithPath: explicit), true)
+      }
+    }
+    return (homeDirectory.appendingPathComponent(".codewhale/config.toml"), false)
+  }
+
+  private func buildCodewhaleConfig(original: String, nodeBin: String, hookScript: String) -> (text: String, counters: ChangeCounters) {
+    var counters = ChangeCounters()
+    if original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      counters.added = Self.codewhaleEvents.count
+      return (bootstrapCodewhaleConfig(nodeBin: nodeBin, hookScript: hookScript), counters)
+    }
+
+    let stripped = removeCodewhaleManagedHookSections(from: original)
+    counters.removed = stripped.removed
+    let existingManaged = Set(stripped.removedEvents)
+    var ensured = ensureCodewhaleHooksEnabled(stripped.text)
+    if ensured.changed {
+      counters.updated += 1
+    }
+    let entries = Self.codewhaleEvents.map { event, background in
+      codewhaleHookEntry(
+        event: event,
+        background: background,
+        command: hookCommand(agentId: "codewhale", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "codewhale-hook.js")
+      )
+    }
+    ensured.text = appendCodewhaleHookEntries(entries, to: ensured.text)
+    if ensured.text == original {
+      counters = ChangeCounters(skipped: Self.codewhaleEvents.count)
+    } else {
+      counters.added += Self.codewhaleEvents.filter { !existingManaged.contains($0.event) }.count
+      counters.updated += existingManaged.count
+    }
+    return (ensured.text, counters)
+  }
+
+  private func bootstrapCodewhaleConfig(nodeBin: String, hookScript: String) -> String {
+    let entries = Self.codewhaleEvents.map { event, background in
+      codewhaleHookEntry(
+        event: event,
+        background: background,
+        command: hookCommand(agentId: "codewhale", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "codewhale-hook.js")
+      )
+    }
+    return [
+      "# codewhale Configuration",
+      "",
+      "[hooks]",
+      "enabled = true",
+      "",
+      entries.joined(separator: "\n\n")
+    ].joined(separator: "\n") + "\n"
+  }
+
+  private func codewhaleHookEntry(event: String, background: Bool, command: String) -> String {
+    var lines = [
+      "[[hooks.hooks]]",
+      "# managed by clawd-on-desk",
+      "event = \"\(event)\"",
+      "command = '''\(command)'''"
+    ]
+    if background {
+      lines.append("background = true")
+      lines.append("timeout_secs = 5")
+    } else {
+      lines.append("timeout_secs = 30")
+      lines.append("continue_on_error = true")
+    }
+    return lines.joined(separator: "\n")
+  }
+
+  private func removeCodewhaleManagedHookSections(from text: String) -> (text: String, removed: Int, removedEvents: [String]) {
+    let lines = text.components(separatedBy: "\n")
+    var output: [String] = []
+    var removed = 0
+    var removedEvents: [String] = []
+    var index = 0
+    while index < lines.count {
+      let line = lines[index]
+      if line.trimmingCharacters(in: .whitespacesAndNewlines) == "[[hooks.hooks]]" {
+        var section = [line]
+        var end = index + 1
+        while end < lines.count {
+          let trimmed = lines[end].trimmingCharacters(in: .whitespacesAndNewlines)
+          if trimmed.hasPrefix("[") { break }
+          section.append(lines[end])
+          end += 1
+        }
+        if codewhaleHookSectionIsManaged(section) {
+          if output.last?.contains("managed by clawd-on-desk") == true {
+            output.removeLast()
+          }
+          removed += 1
+          if let event = codewhaleHookSectionEvent(section) {
+            removedEvents.append(event)
+          }
+        } else {
+          output.append(contentsOf: section)
+        }
+        index = end
+        continue
+      }
+      output.append(line)
+      index += 1
+    }
+    return (output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n", removed, removedEvents)
+  }
+
+  private func codewhaleHookSectionIsManaged(_ lines: [String]) -> Bool {
+    lines.contains { $0.contains("managed by clawd-on-desk") || $0.contains("codewhale-hook.js") }
+  }
+
+  private func codewhaleHookSectionEvent(_ lines: [String]) -> String? {
+    for line in lines {
+      guard let range = line.range(of: #"^\s*event\s*=\s*"([^"]+)""#, options: .regularExpression) else { continue }
+      let matched = String(line[range])
+      return matched
+        .replacingOccurrences(of: #"^\s*event\s*=\s*""#, with: "", options: .regularExpression)
+        .replacingOccurrences(of: #""$"#, with: "", options: .regularExpression)
+    }
+    return nil
+  }
+
+  private func ensureCodewhaleHooksEnabled(_ text: String) -> (text: String, changed: Bool) {
+    var lines = text.components(separatedBy: "\n")
+    if let hooksIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "[hooks]" }) {
+      var endIndex = lines.count
+      for index in (hooksIndex + 1)..<lines.count {
+        let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("[") {
+          endIndex = index
+          break
+        }
+      }
+      for index in (hooksIndex + 1)..<endIndex {
+        if lines[index].range(of: #"^\s*enabled\s*="#, options: .regularExpression) != nil {
+          if lines[index].range(of: #"^\s*enabled\s*=\s*true(?:\s*(?:#.*)?)?$"#, options: .regularExpression) != nil {
+            return (text.trimmingCharacters(in: .whitespacesAndNewlines) + "\n", false)
+          }
+          lines[index] = "enabled = true"
+          return (lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n", true)
+        }
+      }
+      lines.insert("enabled = true", at: hooksIndex + 1)
+      return (lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n", true)
+    }
+    var base = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !base.isEmpty { base += "\n\n" }
+    base += "[hooks]\nenabled = true\n"
+    return (base, true)
+  }
+
+  private func appendCodewhaleHookEntries(_ entries: [String], to text: String) -> String {
+    var base = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !base.isEmpty { base += "\n\n" }
+    base += entries.joined(separator: "\n\n")
+    return base + "\n"
+  }
+
   private func supportedClaudeVersionedEvents() -> (events: [String], warning: String?) {
     guard let version = detectClaudeVersion() else {
       return ([], "Claude Code version could not be detected; versioned hooks skipped.")
@@ -1277,6 +1494,16 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "PermissionRequest",
     "PermissionDenied",
     "SessionEnd"
+  ]
+
+  private static let codewhaleEvents: [(event: String, background: Bool)] = [
+    ("session_start", true),
+    ("session_end", false),
+    ("message_submit", true),
+    ("tool_call_before", true),
+    ("tool_call_after", true),
+    ("mode_change", true),
+    ("on_error", true)
   ]
 
   private static let copilotEvents = [
