@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 
 public struct NativeIntegrationSummary: Equatable, Sendable {
   public var agentId: String
@@ -61,6 +62,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "pi",
     "openclaw",
     "opencode",
+    "hermes",
     "kiro-cli",
     "codewhale",
     "qwen-code",
@@ -117,6 +119,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installOpenClaw()
       case "opencode":
         return try installOpencode()
+      case "hermes":
+        return try installHermes()
       case "kiro-cli":
         return try installKiro()
       case "codewhale":
@@ -166,6 +170,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallOpenClaw()
       case "opencode":
         return try uninstallOpencode()
+      case "hermes":
+        return try uninstallHermes()
       case "kiro-cli":
         return try uninstallKiro()
       case "codewhale":
@@ -841,6 +847,96 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     )
   }
 
+  private func installHermes() throws -> NativeIntegrationSummary {
+    guard isHermesInstalled() else {
+      return .init(agentId: "hermes", action: "install", status: "skip", message: "Hermes Agent is not installed; skipped plugin sync")
+    }
+
+    let hermesHome = resolveHermesHome()
+    let syncHomes = hermesHomesForSync(hermesHome)
+    let primaryCommand = resolveHermesCommand(hermesHome: hermesHome)
+    var counters = ChangeCounters()
+    var warnings: [String] = []
+    var primaryError: String?
+
+    for targetHome in syncHomes {
+      let pluginDir = targetHome.appendingPathComponent("plugins/clawd-on-desk", isDirectory: true)
+      counters.merge(try copyManagedHermesPluginFiles(to: pluginDir))
+
+      let enable = runHermesCli(
+        args: ["plugins", "enable", "clawd-on-desk"],
+        hermesHome: targetHome,
+        hermesCommand: primaryCommand
+      )
+      guard !enable.ok else { continue }
+
+      let command = formatHermesCommand(primaryCommand, ["plugins", "enable", "clawd-on-desk"])
+      let message = enable.unavailable
+        ? "Hermes plugin files were installed, but Hermes CLI was not found. Run: \(command)"
+        : "Hermes plugin files were installed, but enabling failed: \(enable.message)"
+      if targetHome.standardizedFileURL.path == hermesHome.standardizedFileURL.path {
+        primaryError = message
+      } else {
+        warnings.append(message)
+      }
+    }
+
+    if let primaryError {
+      return NativeIntegrationSummary(
+        agentId: "hermes",
+        action: "install",
+        status: "error",
+        message: primaryError,
+        added: counters.added,
+        updated: counters.updated,
+        skipped: counters.skipped,
+        warnings: warnings
+      )
+    }
+
+    return NativeIntegrationSummary(
+      agentId: "hermes",
+      action: "install",
+      status: "ok",
+      message: counters.added > 0 || counters.updated > 0 ? "Swift Hermes plugin installed" : "Swift Hermes plugin already installed",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      warnings: warnings
+    )
+  }
+
+  private func uninstallHermes() throws -> NativeIntegrationSummary {
+    let hermesHome = resolveHermesHome()
+    let pluginDir = hermesHome.appendingPathComponent("plugins/clawd-on-desk", isDirectory: true)
+    let command = resolveHermesCommand(hermesHome: hermesHome)
+    let disable = runHermesCli(args: ["plugins", "disable", "clawd-on-desk"], hermesHome: hermesHome, hermesCommand: command)
+    var warnings: [String] = []
+    if !disable.ok {
+      let display = formatHermesCommand(command, ["plugins", "disable", "clawd-on-desk"])
+      warnings.append(
+        disable.unavailable
+          ? "Hermes CLI was not found; skipped disable. If Hermes keeps a stale enabled entry, run: \(display)"
+          : "Hermes CLI disable failed: \(disable.message)"
+      )
+    }
+
+    var removed = 0
+    if fileManager.fileExists(atPath: pluginDir.path) {
+      try fileManager.removeItem(at: pluginDir)
+      removed = 1
+    }
+    return NativeIntegrationSummary(
+      agentId: "hermes",
+      action: "uninstall",
+      status: "ok",
+      message: warnings.isEmpty ? "Swift Hermes plugin removed" : "Swift Hermes plugin removed with warnings",
+      skipped: removed == 0 ? 1 : 0,
+      removed: removed,
+      warnings: warnings
+    )
+  }
+
   private func installCursor() throws -> NativeIntegrationSummary {
     let cursorDir = homeDirectory.appendingPathComponent(".cursor", isDirectory: true)
     guard fileManager.fileExists(atPath: cursorDir.path) else {
@@ -1400,6 +1496,181 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     return marker["app"] as? String == "clawd-on-desk"
       && marker["integration"] as? String == "pi"
       && marker["managed"] as? Bool == true
+  }
+
+  private func resolveHermesHome() -> URL {
+    if let value = trimmedEnvironment("HERMES_HOME") {
+      return URL(fileURLWithPath: value).standardizedFileURL
+    }
+    if let localAppData = trimmedEnvironment("LOCALAPPDATA") {
+      let localHermes = URL(fileURLWithPath: localAppData)
+        .appendingPathComponent("hermes", isDirectory: true)
+        .standardizedFileURL
+      if fileManager.fileExists(atPath: localHermes.appendingPathComponent("config.yaml").path)
+        || fileManager.fileExists(atPath: localHermes.appendingPathComponent("hermes-agent/venv/Scripts/hermes.exe").path) {
+        return localHermes
+      }
+    }
+    return homeDirectory.appendingPathComponent(".hermes", isDirectory: true).standardizedFileURL
+  }
+
+  private func isHermesInstalled() -> Bool {
+    let homes: [URL]
+    if let value = trimmedEnvironment("HERMES_HOME") {
+      homes = [URL(fileURLWithPath: value).standardizedFileURL]
+    } else {
+      var candidates: [URL] = []
+      if let localAppData = trimmedEnvironment("LOCALAPPDATA") {
+        candidates.append(URL(fileURLWithPath: localAppData).appendingPathComponent("hermes", isDirectory: true).standardizedFileURL)
+      }
+      candidates.append(homeDirectory.appendingPathComponent(".hermes", isDirectory: true).standardizedFileURL)
+      homes = candidates
+    }
+
+    for home in homes {
+      if fileManager.fileExists(atPath: home.appendingPathComponent("config.yaml").path) {
+        return true
+      }
+      if hermesCommandCandidates(hermesHome: home).contains(where: { fileManager.fileExists(atPath: $0.path) }) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func hermesHomesForSync(_ hermesHome: URL) -> [URL] {
+    var homes = [hermesHome]
+    let profilesDir = hermesHome.appendingPathComponent("profiles", isDirectory: true)
+    guard let entries = try? fileManager.contentsOfDirectory(
+      at: profilesDir,
+      includingPropertiesForKeys: [.isDirectoryKey],
+      options: [.skipsHiddenFiles]
+    ) else {
+      return homes
+    }
+
+    for entry in entries.sorted(by: { $0.path < $1.path }) {
+      guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+      guard fileManager.fileExists(atPath: entry.appendingPathComponent("config.yaml").path) else { continue }
+      if !homes.contains(where: { $0.standardizedFileURL.path == entry.standardizedFileURL.path }) {
+        homes.append(entry.standardizedFileURL)
+      }
+    }
+    return homes
+  }
+
+  private func copyManagedHermesPluginFiles(to pluginDir: URL) throws -> ChangeCounters {
+    let sourceDir = projectRoot.appendingPathComponent("hooks/hermes-plugin", isDirectory: true)
+    var counters = ChangeCounters()
+    try fileManager.createDirectory(at: pluginDir, withIntermediateDirectories: true)
+    for file in ["plugin.yaml", "__init__.py"] {
+      let source = try Data(contentsOf: sourceDir.appendingPathComponent(file))
+      let target = pluginDir.appendingPathComponent(file)
+      if !fileManager.fileExists(atPath: target.path) {
+        try source.write(to: target)
+        counters.added += 1
+        continue
+      }
+      let current = try Data(contentsOf: target)
+      if current == source {
+        counters.skipped += 1
+      } else {
+        try source.write(to: target)
+        counters.updated += 1
+      }
+    }
+    return counters
+  }
+
+  private func hermesCommandCandidates(hermesHome: URL) -> [URL] {
+    var candidates = [
+      hermesHome.appendingPathComponent("hermes-agent/venv/bin/hermes"),
+      hermesHome.appendingPathComponent("hermes-agent/venv/Scripts/hermes.exe")
+    ]
+    if let localAppData = trimmedEnvironment("LOCALAPPDATA") {
+      candidates.append(
+        URL(fileURLWithPath: localAppData)
+          .appendingPathComponent("hermes/hermes-agent/venv/Scripts/hermes.exe")
+      )
+    }
+    var seen = Set<String>()
+    return candidates.filter { seen.insert($0.standardizedFileURL.path).inserted }
+  }
+
+  private func resolveHermesCommand(hermesHome: URL) -> String {
+    if let override = trimmedEnvironment("CLAWD_HERMES_COMMAND") {
+      return override
+    }
+    for candidate in hermesCommandCandidates(hermesHome: hermesHome) where fileManager.fileExists(atPath: candidate.path) {
+      return candidate.path
+    }
+    return "hermes"
+  }
+
+  private func runHermesCli(args: [String], hermesHome: URL, hermesCommand: String, timeout: TimeInterval = 5) -> HermesCommandResult {
+    let process = Process()
+    let pipe = Pipe()
+    if hermesCommand.contains("/") {
+      process.executableURL = URL(fileURLWithPath: hermesCommand)
+      process.arguments = args
+    } else {
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+      process.arguments = [hermesCommand] + args
+    }
+    var env = ProcessInfo.processInfo.environment
+    for (key, value) in environment {
+      env[key] = value
+    }
+    env["HERMES_HOME"] = hermesHome.path
+    process.environment = env
+    process.standardOutput = pipe
+    process.standardError = pipe
+
+    do {
+      try process.run()
+    } catch {
+      return HermesCommandResult(ok: false, unavailable: true, message: error.localizedDescription)
+    }
+
+    let group = DispatchGroup()
+    group.enter()
+    DispatchQueue.global(qos: .utility).async {
+      process.waitUntilExit()
+      group.leave()
+    }
+    if group.wait(timeout: .now() + timeout) == .timedOut {
+      process.terminate()
+      return HermesCommandResult(ok: false, unavailable: false, message: "Hermes CLI timed out")
+    }
+
+    let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard process.terminationStatus == 0 else {
+      let unavailable = !hermesCommand.contains("/") && (process.terminationStatus == 126 || process.terminationStatus == 127)
+      return HermesCommandResult(
+        ok: false,
+        unavailable: unavailable,
+        message: output.isEmpty ? "Hermes CLI exited with status \(process.terminationStatus)" : output
+      )
+    }
+    return HermesCommandResult(ok: true, unavailable: false, message: output)
+  }
+
+  private func formatHermesCommand(_ command: String, _ args: [String]) -> String {
+    ([command] + args).map(quoteCommandToken).joined(separator: " ")
+  }
+
+  private func quoteCommandToken(_ value: String) -> String {
+    value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
+      ? value
+      : "\"\(value.replacingOccurrences(of: "\"", with: "\\\""))\""
+  }
+
+  private func trimmedEnvironment(_ key: String) -> String? {
+    guard let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+      return nil
+    }
+    return value
   }
 
   private func resolveOpenClawPaths() -> (stateDir: URL, configPath: URL) {
@@ -2369,6 +2640,12 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       skipped += other.skipped
       removed += other.removed
     }
+  }
+
+  private struct HermesCommandResult: Sendable {
+    var ok: Bool
+    var unavailable: Bool
+    var message: String
   }
 
   private static let claudeCoreEvents = [

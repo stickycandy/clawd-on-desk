@@ -379,6 +379,59 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertNil(uninstalledEntries["clawd-on-desk"])
   }
 
+  func testHermesInstallerCopiesPluginFilesEnablesProfilesAndUninstallsRootPlugin() throws {
+    let fixture = try Fixture()
+    try fixture.writeProjectText("name: clawd-on-desk\n", to: "hooks/hermes-plugin/plugin.yaml")
+    try fixture.writeProjectText("PLUGIN = 'clawd'\n", to: "hooks/hermes-plugin/__init__.py")
+    try fixture.writeText("root: true\n", to: ".hermes/config.yaml")
+    try fixture.writeText("profile: true\n", to: ".hermes/profiles/dev/config.yaml")
+    try fixture.writeText("""
+    #!/bin/sh
+    printf '%s|%s %s %s\\n' "$HERMES_HOME" "$1" "$2" "$3" >> "$CLAWD_TEST_HERMES_LOG"
+    """, to: ".hermes/hermes-agent/venv/bin/hermes")
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o755],
+      ofItemAtPath: fixture.home.appendingPathComponent(".hermes/hermes-agent/venv/bin/hermes").path
+    )
+    let logPath = fixture.root.appendingPathComponent("hermes-cli.log")
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_TEST_HERMES_LOG": logPath.path]
+    )
+
+    let summary = try XCTUnwrap(installer.install(agentId: "hermes", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+    XCTAssertEqual(summary.added, 4)
+    XCTAssertEqual(try fixture.readText(".hermes/plugins/clawd-on-desk/plugin.yaml"), "name: clawd-on-desk\n")
+    XCTAssertEqual(try fixture.readText(".hermes/profiles/dev/plugins/clawd-on-desk/__init__.py"), "PLUGIN = 'clawd'\n")
+    let log = try String(contentsOf: logPath, encoding: .utf8)
+    XCTAssertTrue(log.contains("\(fixture.home.appendingPathComponent(".hermes").path)|plugins enable clawd-on-desk"))
+    XCTAssertTrue(log.contains("\(fixture.home.appendingPathComponent(".hermes/profiles/dev").path)|plugins enable clawd-on-desk"))
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "hermes"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 1)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.home.appendingPathComponent(".hermes/plugins/clawd-on-desk").path))
+    let updatedLog = try String(contentsOf: logPath, encoding: .utf8)
+    XCTAssertTrue(updatedLog.contains("\(fixture.home.appendingPathComponent(".hermes").path)|plugins disable clawd-on-desk"))
+  }
+
+  func testHermesInstallerSkipsWithoutCreatingHermesHomeWhenNotInstalled() throws {
+    let fixture = try Fixture()
+    try fixture.writeProjectText("name: clawd-on-desk\n", to: "hooks/hermes-plugin/plugin.yaml")
+    try fixture.writeProjectText("PLUGIN = 'clawd'\n", to: "hooks/hermes-plugin/__init__.py")
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: [:]
+    )
+
+    let summary = try XCTUnwrap(installer.install(agentId: "hermes", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "skip")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.home.appendingPathComponent(".hermes").path))
+  }
+
   func testOpencodeInstallerUpdatesStalePluginPathAndUninstallsExactEntry() throws {
     let fixture = try Fixture()
     try fixture.writeJSON([
@@ -714,5 +767,11 @@ private final class Fixture {
 
   func readText(_ relativePath: String) throws -> String {
     try String(contentsOf: home.appendingPathComponent(relativePath), encoding: .utf8)
+  }
+
+  func writeProjectText(_ text: String, to relativePath: String) throws {
+    let url = projectRoot.appendingPathComponent(relativePath)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try text.write(to: url, atomically: true, encoding: .utf8)
   }
 }
