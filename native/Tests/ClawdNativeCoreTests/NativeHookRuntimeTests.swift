@@ -109,6 +109,33 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(NativeHookRuntime.stdout(agentId: "gemini-cli", event: "AfterTool"), #"{"decision":"allow"}"#)
   }
 
+  func testCursorRouteUsesHookEventPayloadWorkspaceAndDisplayHint() throws {
+    let payload = Data(#"{"hook_event_name":"preToolUse","conversation_id":"c1","workspace_roots":["/repo"],"tool_name":"Shell"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "cursor-agent", event: "unknown", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "cursor-agent")
+    XCTAssertEqual(body.string("session_id"), "c1")
+    XCTAssertEqual(body.string("state"), "working")
+    XCTAssertEqual(body.string("event"), "PreToolUse")
+    XCTAssertEqual(body.string("cwd"), "/repo")
+    XCTAssertEqual(body.string("display_svg"), "clawd-working-building.svg")
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "cursor-agent", event: "beforeSubmitPrompt"), #"{"continue":true}"#)
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "cursor-agent", event: "postToolUse"), "{}")
+  }
+
+  func testCursorStopErrorBecomesStopFailure() throws {
+    let payload = Data(#"{"hook_event_name":"stop","session_id":"s1","status":"error"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "cursor-agent", event: "stop", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("session_id"), "s1")
+    XCTAssertEqual(body.string("state"), "error")
+    XCTAssertEqual(body.string("event"), "StopFailure")
+  }
+
   func testCodewhaleBuildsPayloadFromEnvironmentAndCache() throws {
     let fixture = try HookFixture()
     let cache = fixture.root.appendingPathComponent("codewhale-session-cache")

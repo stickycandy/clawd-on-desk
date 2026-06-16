@@ -31,6 +31,8 @@ public struct NativeHookRuntime {
       return copilotRoute(payload: object)
     case "gemini-cli":
       return geminiRoute(payload: object)
+    case "cursor-agent":
+      return cursorRoute(payload: object)
     case "codewhale":
       return codewhaleRoute(payload: object)
     case "reasonix":
@@ -70,6 +72,9 @@ public struct NativeHookRuntime {
 
   public static func stdout(agentId: String, event: String, stdin: Data? = nil) -> String? {
     if agentId == "qoder" { return "{}" }
+    if agentId == "cursor-agent" {
+      return event == "beforeSubmitPrompt" ? #"{"continue":true}"# : "{}"
+    }
     guard agentId == "gemini-cli" else { return nil }
     var hookEvent = event
     if let stdin,
@@ -281,6 +286,30 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func cursorRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("hook_event_name") ?? event
+    guard var mapped = Self.cursorState[hookEvent] else { return .none }
+    if hookEvent == "stop", payload.string("status") == "error" {
+      mapped = (state: "error", event: "StopFailure")
+    }
+    let sessionId = firstNonEmpty(payload.string("conversation_id"), payload.string("session_id")) ?? "default"
+    var sharedPayload = payload
+    if sharedPayload.string("cwd") == nil, let workspace = firstString(in: payload["workspace_roots"]) {
+      sharedPayload["cwd"] = .string(workspace)
+    }
+    var body = baseState(
+      state: mapped.state,
+      sessionId: sessionId,
+      event: mapped.event,
+      agentId: "cursor-agent",
+      payload: sharedPayload
+    )
+    if let hint = cursorDisplaySVG(hookEvent: hookEvent, payload: payload) {
+      body["display_svg"] = .string(hint)
+    }
+    return .state(.object(body))
+  }
+
   private func codewhaleRoute(payload: [String: JSONValue]) -> Route {
     let hookEvent = payload.string("event") ?? event
     guard var mapped = Self.codewhaleState[hookEvent] else { return .none }
@@ -435,6 +464,8 @@ public struct NativeHookRuntime {
       return ["copilot"]
     case "gemini-cli":
       return ["gemini"]
+    case "cursor-agent":
+      return ["cursor", "Cursor"]
     case "codewhale":
       return ["codewhale"]
     case "reasonix":
@@ -586,6 +617,29 @@ public struct NativeHookRuntime {
     if ["subagent", "child", "delegate", "delegated", "explorer", "worker"].contains(normalized) {
       return "subagent"
     }
+    return nil
+  }
+
+  private func firstString(in value: JSONValue?) -> String? {
+    guard case .array(let array)? = value else { return nil }
+    for item in array {
+      if case .string(let candidate) = item {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+      }
+    }
+    return nil
+  }
+
+  private func cursorDisplaySVG(hookEvent: String, payload: [String: JSONValue]) -> String? {
+    guard hookEvent == "preToolUse" || hookEvent == "postToolUse",
+          let name = payload.string("tool_name"),
+          !name.isEmpty
+    else { return nil }
+    if name == "Shell" || name.hasPrefix("MCP:") { return "clawd-working-building.svg" }
+    if name == "Task" { return "clawd-headphones-groove.svg" }
+    if name == "Write" || name == "Delete" { return "clawd-working-typing.svg" }
+    if name == "Read" || name == "Grep" { return "clawd-idle-reading.svg" }
     return nil
   }
 
@@ -1056,6 +1110,20 @@ public struct NativeHookRuntime {
     "AfterAgent": ("idle", "AfterAgent", false),
     "Notification": ("notification", "Notification", false),
     "PreCompress": ("idle", "PreCompress", true)
+  ]
+
+  private static let cursorState: [String: (state: String, event: String)] = [
+    "sessionStart": ("idle", "SessionStart"),
+    "sessionEnd": ("sleeping", "SessionEnd"),
+    "beforeSubmitPrompt": ("thinking", "UserPromptSubmit"),
+    "preToolUse": ("working", "PreToolUse"),
+    "postToolUse": ("working", "PostToolUse"),
+    "postToolUseFailure": ("working", "PostToolUseFailure"),
+    "stop": ("attention", "Stop"),
+    "subagentStart": ("juggling", "SubagentStart"),
+    "subagentStop": ("working", "SubagentStop"),
+    "preCompact": ("sweeping", "PreCompact"),
+    "afterAgentThought": ("thinking", "AfterAgentThought")
   ]
 
   private static let codewhaleState: [String: (state: String, event: String)] = [

@@ -143,6 +143,51 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertTrue(String(describing: preCompress).contains("PreCompress"))
   }
 
+  func testCursorInstallerPreservesUserHooksAndUninstallsManagedEntries() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "hooks": [
+        "sessionStart": [
+          [
+            "command": "echo user"
+          ],
+          [
+            "command": "node /old/cursor-hook.js"
+          ]
+        ]
+      ]
+    ], to: ".cursor/hooks.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "cursor-agent", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+
+    let settings = try fixture.readJSON(".cursor/hooks.json")
+    XCTAssertEqual(settings["version"] as? Int, 1)
+    let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+    let sessionStart = try XCTUnwrap(hooks["sessionStart"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: sessionStart).contains("echo user"))
+    XCTAssertFalse(String(describing: sessionStart).contains("/old/cursor-hook.js"))
+    XCTAssertTrue(String(describing: sessionStart).contains(#""/opt/homebrew/bin/node" "\#(fixture.projectRoot.path)/hooks/cursor-hook.js" "sessionStart""#))
+    XCTAssertNotNil(hooks["beforeSubmitPrompt"])
+    XCTAssertNotNil(hooks["afterAgentThought"])
+    XCTAssertNotNil(hooks["stop"])
+    XCTAssertEqual(String(describing: settings).components(separatedBy: "cursor-hook.js").count - 1, 11)
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "cursor-agent"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 11)
+    let uninstalled = try fixture.readJSON(".cursor/hooks.json")
+    let uninstalledHooks = try XCTUnwrap(uninstalled["hooks"] as? [String: Any])
+    let remainingSessionStart = try XCTUnwrap(uninstalledHooks["sessionStart"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: remainingSessionStart).contains("echo user"))
+    XCTAssertFalse(String(describing: uninstalled).contains("cursor-hook.js"))
+  }
+
   func testCodewhaleInstallerPreservesUserHooksAndUninstallsManagedSections() throws {
     let fixture = try Fixture()
     try fixture.writeText("""

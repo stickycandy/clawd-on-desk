@@ -53,6 +53,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "claude-code",
     "codex",
     "copilot-cli",
+    "cursor-agent",
     "gemini-cli",
     "codewhale",
     "qwen-code",
@@ -93,6 +94,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installQwen()
       case "copilot-cli":
         return try installCopilot()
+      case "cursor-agent":
+        return try installCursor()
       case "gemini-cli":
         return try installGemini()
       case "codewhale":
@@ -126,6 +129,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallQwen()
       case "copilot-cli":
         return try uninstallCopilot()
+      case "cursor-agent":
+        return try uninstallCursor()
       case "gemini-cli":
         return try uninstallGemini()
       case "codewhale":
@@ -422,6 +427,58 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       action: "uninstall",
       status: "ok",
       message: "Swift Gemini hooks removed from \(settingsPath.path)",
+      removed: counters.removed
+    )
+  }
+
+  private func installCursor() throws -> NativeIntegrationSummary {
+    let cursorDir = homeDirectory.appendingPathComponent(".cursor", isDirectory: true)
+    guard fileManager.fileExists(atPath: cursorDir.path) else {
+      return .init(agentId: "cursor-agent", action: "install", status: "skip", message: "\(cursorDir.path) not found")
+    }
+    let hooksPath = cursorDir.appendingPathComponent("hooks.json")
+    var settings = try readJSONObject(hooksPath)
+    if settings["version"] == nil { settings["version"] = 1 }
+    var counters = ChangeCounters()
+    let nodeBin = resolveNodeBin(existingSettings: settings, marker: "cursor-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/cursor-hook.js").path
+    for event in Self.cursorEvents {
+      let desiredEntry = [
+        "command": hookCommand(agentId: "cursor-agent", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "cursor-hook.js")
+      ]
+      counters.merge(syncWholeHookEntry(
+        settings: &settings,
+        event: event,
+        marker: "cursor-hook.js",
+        desiredEntry: desiredEntry
+      ))
+    }
+    try writeJSONObject(settings, to: hooksPath)
+    return NativeIntegrationSummary(
+      agentId: "cursor-agent",
+      action: "install",
+      status: "ok",
+      message: "Swift Cursor hooks -> \(hooksPath.path)",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      removed: counters.removed
+    )
+  }
+
+  private func uninstallCursor() throws -> NativeIntegrationSummary {
+    let hooksPath = homeDirectory.appendingPathComponent(".cursor/hooks.json")
+    var settings = try readJSONObject(hooksPath, missingIsEmpty: false)
+    var counters = ChangeCounters()
+    for event in Self.cursorEvents {
+      counters.merge(removeWholeHookEntries(settings: &settings, event: event, marker: "cursor-hook.js"))
+    }
+    try writeJSONObject(settings, to: hooksPath, backup: true)
+    return NativeIntegrationSummary(
+      agentId: "cursor-agent",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift Cursor hooks removed from \(hooksPath.path)",
       removed: counters.removed
     )
   }
@@ -1469,6 +1526,20 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "AfterTool",
     "Notification",
     "PreCompress"
+  ]
+
+  private static let cursorEvents = [
+    "sessionStart",
+    "sessionEnd",
+    "beforeSubmitPrompt",
+    "preToolUse",
+    "postToolUse",
+    "postToolUseFailure",
+    "subagentStart",
+    "subagentStop",
+    "preCompact",
+    "afterAgentThought",
+    "stop"
   ]
 
   private static let reasonixEvents = [
