@@ -80,6 +80,43 @@ final class StateEngineTests: XCTestCase {
     XCTAssertEqual(doneEngine.current(), .attention)
   }
 
+  func testSessionEndDeletesSessionAndRecomputesDisplayState() {
+    let engine = StateEngine(timings: StateTiming(minDisplayMs: [:]))
+    engine.updateSession("s1", state: .working, event: "PreToolUse")
+    engine.updateSession("s2", state: .thinking, event: "UserPromptSubmit")
+
+    engine.updateSession("s1", state: .sleeping, event: "SessionEnd")
+
+    let snapshot = engine.snapshot()
+    XCTAssertNil(snapshot.sessions.first { $0.id == "s1" })
+    XCTAssertNotNil(snapshot.sessions.first { $0.id == "s2" })
+    XCTAssertEqual(snapshot.currentState, .thinking)
+  }
+
+  func testSessionEndSweepingDeletesSessionAndKeepsClearAnimation() {
+    let engine = StateEngine(timings: StateTiming(minDisplayMs: [:]))
+    engine.updateSession("s1", state: .working, event: "PreToolUse")
+    engine.updateSession("s2", state: .working, event: "PreToolUse")
+
+    engine.updateSession("s1", state: .sweeping, event: "SessionEnd")
+
+    let snapshot = engine.snapshot()
+    XCTAssertNil(snapshot.sessions.first { $0.id == "s1" })
+    XCTAssertNotNil(snapshot.sessions.first { $0.id == "s2" })
+    XCTAssertEqual(snapshot.currentState, .sweeping)
+  }
+
+  func testHeadlessSessionEndSweepingDoesNotTriggerClearAnimation() {
+    let engine = StateEngine(timings: StateTiming(minDisplayMs: [:]))
+    engine.updateSession("headless", state: .working, event: "PreToolUse", metadata: SessionMetadata(agentId: "codex", headless: true))
+
+    engine.updateSession("headless", state: .sweeping, event: "SessionEnd", metadata: SessionMetadata(agentId: "codex", headless: true))
+
+    let snapshot = engine.snapshot()
+    XCTAssertTrue(snapshot.sessions.isEmpty)
+    XCTAssertEqual(snapshot.currentState, .idle)
+  }
+
   func testSuppressedOneShotVisualKeepsBookkeepingWithoutChangingCurrentState() {
     let engine = StateEngine()
     engine.updateSession(

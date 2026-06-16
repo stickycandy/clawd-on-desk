@@ -193,6 +193,40 @@ final class RuntimeSurfaceTests: XCTestCase {
     XCTAssertEqual(session.badge, "Input")
   }
 
+  func testStateSessionEndRemovesSessionOverHTTP() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("clawd-native-session-end-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    let server = LocalHTTPServer(
+      engine: StateEngine(timings: StateTiming(minDisplayMs: [:])),
+      preferences: { Preferences() },
+      permissions: PermissionCoordinator(),
+      runtimeConfigURL: root.appendingPathComponent("runtime.json")
+    )
+    defer { server.stop() }
+    let port = try startServer(server, ports: Array(26800..<26900))
+
+    let startBody = #"{"state":"working","session_id":"codex:s1","event":"PreToolUse","agent_id":"codex"}"#
+    let startResponse = try tcpHTTPExchange(port: port, parts: [httpRequest(method: "POST", path: "/state", port: port, body: startBody)])
+    XCTAssertTrue(String(decoding: startResponse, as: UTF8.self).contains("HTTP/1.1 200 OK"))
+
+    let endBody = #"{"state":"sleeping","session_id":"codex:s1","event":"SessionEnd","agent_id":"codex"}"#
+    let endResponse = try tcpHTTPExchange(port: port, parts: [httpRequest(method: "POST", path: "/state", port: port, body: endBody)])
+    XCTAssertTrue(String(decoding: endResponse, as: UTF8.self).contains("HTTP/1.1 200 OK"))
+
+    let sessionsResponse = try tcpHTTPExchange(
+      port: port,
+      parts: [Data("GET /sessions HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nConnection: close\r\n\r\n".utf8)]
+    )
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let snapshot = try decoder.decode(StateSnapshot.self, from: httpBody(sessionsResponse))
+    XCTAssertEqual(snapshot.currentState, .idle)
+    XCTAssertTrue(snapshot.sessions.isEmpty)
+  }
+
   func testMobilePreviewRouteRequiresEnabledPreference() throws {
     let root = FileManager.default.temporaryDirectory
       .appendingPathComponent("clawd-native-mobile-preview-\(UUID().uuidString)", isDirectory: true)

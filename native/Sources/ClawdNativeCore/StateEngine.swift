@@ -183,6 +183,16 @@ public final class StateEngine: @unchecked Sendable {
       }
       let startedAt = existing?.startedAt ?? now
       let storedState = storedSessionStateLocked(incoming: state, existing: existing, metadata: metadata)
+      if event == "SessionEnd" {
+        let shouldPlaySweeping = state == .sweeping && existing?.metadata.headless != true
+        sessionsById.removeValue(forKey: sid)
+        if shouldPlaySweeping && !doNotDisturb {
+          setStateLocked(.sweeping, force: false)
+        } else {
+          recomputeLocked(force: false)
+        }
+        return
+      }
       sessionsById[sid] = AgentSession(
         id: sid,
         state: storedState,
@@ -192,7 +202,7 @@ public final class StateEngine: @unchecked Sendable {
         metadata: metadata,
         recentEvents: recent
       )
-      if event == "SessionEnd" || state == .sleeping || state == .miniSleep {
+      if state == .sleeping || state == .miniSleep {
         sessionsById[sid]?.state = state
       }
       if metadata.transientPermissionEvent {
