@@ -26,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var idleSleepRuntime: IdleSleepRuntime?
   private var soundRuntime: SoundRuntime?
   private var updateBubble: UpdateBubbleWindowController?
+  private lazy var codexTerminalApprovalMonitor = CodexTerminalApprovalMonitor { [weak self] event in
+    DispatchQueue.main.async {
+      self?.handleCodexTerminalApproval(event)
+    }
+  }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     let prefs = preferencesStore.get()
@@ -131,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     systemBehaviorRuntime?.start()
     idleSleepRuntime?.start()
     soundRuntime?.start()
+    codexTerminalApprovalMonitor.start()
     if !Self.shouldSkipStartupIntegrationSync {
       syncIntegrations()
     }
@@ -154,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     permissionCoordinator.cancelAll(with: .noDecision)
     updateBubble?.hide()
     soundRuntime?.stop()
+    codexTerminalApprovalMonitor.stop()
     idleSleepRuntime?.stop()
     systemBehaviorRuntime?.stop()
     shortcutRuntime?.stop()
@@ -245,6 +252,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     case .clear(let agentId, let sessionId, let reason):
       PassiveNotificationBubbleWindowController.clear(agentId: agentId, sessionId: sessionId, reason: reason)
     }
+  }
+
+  private func handleCodexTerminalApproval(_ event: CodexTerminalApprovalEvent) {
+    let prefs = preferencesStore.get()
+    guard AgentGate.isAgentEnabled(prefs, "codex"),
+          AgentGate.isAgentPermissionsEnabled(prefs, "codex"),
+          !stateEngine.shouldDropForDnd()
+    else { return }
+
+    stateEngine.updateSession(
+      event.sessionId,
+      state: .notification,
+      event: "PermissionRequest",
+      metadata: SessionMetadata(
+        cwd: event.cwd ?? "",
+        agentId: "codex",
+        host: "local",
+        toolName: "Bash",
+        permissionSuspect: true,
+        transientPermissionEvent: true,
+        hookSource: "codex-jsonl-fallback"
+      )
+    )
+
+    PassiveNotificationBubbleWindowController.show(
+      PassiveNotificationRequest(
+        kind: .codexPermission,
+        agentId: "codex",
+        sessionId: event.sessionId,
+        title: "Codex Permission",
+        message: "Approve or reject this command in the Codex terminal.",
+        detail: event.command
+      ),
+      preferences: prefs,
+      petWindow: petWindow?.window
+    )
   }
 
   private func clearAgentRuntime(agentId: String) {
