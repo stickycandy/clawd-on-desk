@@ -82,13 +82,11 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
       backing: .buffered,
       defer: false
     )
-    window.level = .floating
+    FloatingWindowPolicy.applyPersistentOverlay(to: window)
     window.title = ""
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = true
-    window.hidesOnDeactivate = false
-    window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
     window.isReleasedWhenClosed = false
     super.init(window: window)
     window.delegate = self

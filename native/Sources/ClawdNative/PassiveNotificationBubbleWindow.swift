@@ -77,10 +77,9 @@ final class PassiveNotificationBubbleWindowController: NSWindowController, NSWin
       backing: .buffered,
       defer: false
     )
-    window.level = .floating
+    FloatingWindowPolicy.applyPersistentOverlay(to: window)
     window.title = "Clawd Notification"
     window.isReleasedWhenClosed = false
-    window.hidesOnDeactivate = false
     super.init(window: window)
     window.delegate = self
   }

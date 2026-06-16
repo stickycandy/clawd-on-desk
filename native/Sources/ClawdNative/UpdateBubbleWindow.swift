@@ -37,9 +37,8 @@ final class UpdateBubbleWindowController: NSWindowController, NSWindowDelegate {
       defer: false
     )
     window.title = "Clawd Update"
-    window.level = .floating
+    FloatingWindowPolicy.applyPersistentOverlay(to: window)
     window.isReleasedWhenClosed = false
-    window.hidesOnDeactivate = false
     super.init(window: window)
     window.delegate = self
   }
