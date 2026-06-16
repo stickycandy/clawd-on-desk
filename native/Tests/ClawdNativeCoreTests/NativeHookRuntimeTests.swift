@@ -136,6 +136,21 @@ final class NativeHookRuntimeTests: XCTestCase {
     XCTAssertEqual(body.string("event"), "StopFailure")
   }
 
+  func testCodeBuddyRouteAndStdout() throws {
+    let payload = Data(#"{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/repo"}"#.utf8)
+    let route = NativeHookRuntime(agentId: "codebuddy", event: "unknown", environment: [:]).route(stdin: payload)
+    guard case .state(.object(let body)) = route else {
+      return XCTFail("expected state route")
+    }
+    XCTAssertEqual(body.string("agent_id"), "codebuddy")
+    XCTAssertEqual(body.string("session_id"), "s1")
+    XCTAssertEqual(body.string("state"), "working")
+    XCTAssertEqual(body.string("event"), "PreToolUse")
+    XCTAssertEqual(body.string("cwd"), "/repo")
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "codebuddy", event: "PreToolUse"), #"{"decision":"allow"}"#)
+    XCTAssertEqual(NativeHookRuntime.stdout(agentId: "codebuddy", event: "Stop"), "{}")
+  }
+
   func testKiroRouteUsesDefaultSessionAndCamelCaseEvent() throws {
     let payload = Data(#"{"hook_event_name":"preToolUse","cwd":"/repo"}"#.utf8)
     let route = NativeHookRuntime(agentId: "kiro-cli", event: "unknown", environment: [:]).route(stdin: payload)

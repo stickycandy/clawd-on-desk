@@ -51,6 +51,7 @@ public struct NativeIntegrationSummary: Equatable, Sendable {
 public final class NativeIntegrationInstaller: @unchecked Sendable {
   public static let supportedAgentIds: Set<String> = [
     "claude-code",
+    "codebuddy",
     "codex",
     "copilot-cli",
     "cursor-agent",
@@ -89,6 +90,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       switch agentId {
       case "claude-code":
         return try installClaude(autoStart: preferences.autoStartWithClaude, permissionPort: permissionPort)
+      case "codebuddy":
+        return try installCodeBuddy(permissionPort: permissionPort)
       case "codex":
         return try installCodex()
       case "qwen-code":
@@ -126,6 +129,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       switch agentId {
       case "claude-code":
         return try uninstallClaude()
+      case "codebuddy":
+        return try uninstallCodeBuddy()
       case "codex":
         return try uninstallCodex()
       case "qwen-code":
@@ -254,6 +259,76 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       action: "uninstall",
       status: "ok",
       message: "Swift Claude hooks removed from \(settingsPath.path)",
+      removed: counters.removed
+    )
+  }
+
+  private func installCodeBuddy(permissionPort: Int) throws -> NativeIntegrationSummary {
+    let codeBuddyDir = homeDirectory.appendingPathComponent(".codebuddy", isDirectory: true)
+    guard fileManager.fileExists(atPath: codeBuddyDir.path) else {
+      return .init(agentId: "codebuddy", action: "install", status: "skip", message: "\(codeBuddyDir.path) not found")
+    }
+    let settingsPath = codeBuddyDir.appendingPathComponent("settings.json")
+    var settings = try readJSONObject(settingsPath)
+    var counters = ChangeCounters()
+    let nodeBin = resolveNodeBin(existingSettings: settings, marker: "codebuddy-hook.js")
+    let hookScript = projectRoot.appendingPathComponent("hooks/codebuddy-hook.js").path
+
+    for event in Self.codeBuddyEvents {
+      let desired = commandHook(
+        command: hookCommand(agentId: "codebuddy", event: event, nodeBin: nodeBin, scriptPath: hookScript, marker: "codebuddy-hook.js"),
+        timeout: 30
+      )
+      counters.merge(syncNestedCommandHook(
+        settings: &settings,
+        event: event,
+        marker: "codebuddy-hook.js",
+        desired: desired,
+        wrapperMatcher: ""
+      ))
+    }
+
+    let permissionHook: [String: Any] = [
+      "type": "http",
+      "url": "http://127.0.0.1:\(permissionPort)/permission",
+      "timeout": 600
+    ]
+    counters.merge(syncNestedHTTPHook(
+      settings: &settings,
+      event: "PermissionRequest",
+      marker: "127.0.0.1:",
+      desired: permissionHook,
+      wrapperMatcher: "",
+      replaceAnyHTTP: false
+    ))
+
+    try writeJSONObject(settings, to: settingsPath)
+    return NativeIntegrationSummary(
+      agentId: "codebuddy",
+      action: "install",
+      status: "ok",
+      message: "Swift CodeBuddy hooks -> \(settingsPath.path)",
+      added: counters.added,
+      updated: counters.updated,
+      skipped: counters.skipped,
+      removed: counters.removed
+    )
+  }
+
+  private func uninstallCodeBuddy() throws -> NativeIntegrationSummary {
+    let settingsPath = homeDirectory.appendingPathComponent(".codebuddy/settings.json")
+    var settings = try readJSONObject(settingsPath, missingIsEmpty: false)
+    var counters = ChangeCounters()
+    for event in Self.codeBuddyEvents {
+      counters.merge(removeCommandHooks(settings: &settings, event: event, marker: "codebuddy-hook.js"))
+    }
+    counters.merge(removeCodeBuddyPermissionHooks(settings: &settings))
+    try writeJSONObject(settings, to: settingsPath, backup: true)
+    return NativeIntegrationSummary(
+      agentId: "codebuddy",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift CodeBuddy hooks removed from \(settingsPath.path)",
       removed: counters.removed
     )
   }
@@ -911,7 +986,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     event: String,
     marker: String,
     desired: [String: Any],
-    wrapperMatcher: String?
+    wrapperMatcher: String?,
+    replaceAnyHTTP: Bool = true
   ) -> ChangeCounters {
     var hooks = settings["hooks"] as? [String: Any] ?? [:]
     var entries = hooks[event] as? [Any] ?? []
@@ -922,7 +998,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       if var inner = entry["hooks"] as? [Any] {
         for hookIndex in inner.indices {
           guard var hook = inner[hookIndex] as? [String: Any],
-                containsMarker(hook, marker: marker) || hook["type"] as? String == "http"
+                containsMarker(hook, marker: marker) || (replaceAnyHTTP && hook["type"] as? String == "http")
           else { continue }
           if !NSDictionary(dictionary: hook).isEqual(to: desired) {
             hook = desired
@@ -1055,6 +1131,50 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     hooks[event] = next
     settings["hooks"] = hooks
     return counters
+  }
+
+  private func removeCodeBuddyPermissionHooks(settings: inout [String: Any]) -> ChangeCounters {
+    var hooks = settings["hooks"] as? [String: Any] ?? [:]
+    guard var entries = hooks["PermissionRequest"] as? [Any] else { return ChangeCounters() }
+    var removed = 0
+    entries = entries.compactMap { entryValue in
+      guard var entry = entryValue as? [String: Any] else { return entryValue }
+      if isManagedLocalPermissionHook(entry) {
+        removed += 1
+        return nil
+      }
+      if let inner = entry["hooks"] as? [Any] {
+        let nextInner = inner.filter { hookValue in
+          guard let hook = hookValue as? [String: Any] else { return true }
+          if isManagedLocalPermissionHook(hook) {
+            removed += 1
+            return false
+          }
+          return true
+        }
+        if nextInner.isEmpty, entry["command"] == nil, entry["type"] == nil {
+          return nil
+        }
+        entry["hooks"] = nextInner
+      }
+      return entry
+    }
+    guard removed > 0 else { return ChangeCounters() }
+    if entries.isEmpty {
+      hooks.removeValue(forKey: "PermissionRequest")
+    } else {
+      hooks["PermissionRequest"] = entries
+    }
+    settings["hooks"] = hooks
+    return ChangeCounters(removed: removed)
+  }
+
+  private func isManagedLocalPermissionHook(_ hook: [String: Any]) -> Bool {
+    guard hook["type"] as? String == "http",
+          let url = hook["url"] as? String
+    else { return false }
+    let pattern = #"^http://127\.0\.0\.1:(2333[3-7])/permission$"#
+    return url.range(of: pattern, options: .regularExpression) != nil
   }
 
   private func removeCommandHooks(settings: inout [String: Any], event: String, marker: String) -> ChangeCounters {
@@ -1600,6 +1720,17 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     (event: "PreCompact", minimumVersion: "2.1.76"),
     (event: "PostCompact", minimumVersion: "2.1.76"),
     (event: "StopFailure", minimumVersion: "2.1.78")
+  ]
+
+  private static let codeBuddyEvents = [
+    "SessionStart",
+    "SessionEnd",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "Stop",
+    "Notification",
+    "PreCompact"
   ]
 
   private static let codexEvents = [

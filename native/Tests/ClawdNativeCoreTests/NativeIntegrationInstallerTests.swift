@@ -37,6 +37,58 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertNotNil(hooks["StopFailure"])
   }
 
+  func testCodeBuddyInstallerPreservesUserHooksAndAddsPermissionHTTPHook() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON(["hooks": [
+      "SessionStart": [[
+        "matcher": "",
+        "hooks": [[
+          "type": "command",
+          "command": "echo user"
+        ], [
+          "type": "command",
+          "command": "node /old/codebuddy-hook.js"
+        ]]
+      ]],
+      "PermissionRequest": [[
+        "matcher": "",
+        "hooks": [[
+          "type": "http",
+          "url": "http://example.test/permission"
+        ]]
+      ]]
+    ]], to: ".codebuddy/settings.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: ["CLAWD_NODE_BIN": "/opt/homebrew/bin/node"]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "codebuddy", preferences: Preferences(), permissionPort: 23335))
+    XCTAssertEqual(summary.status, "ok")
+
+    let settings = try fixture.readJSON(".codebuddy/settings.json")
+    let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+    let sessionStart = try XCTUnwrap(hooks["SessionStart"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: sessionStart).contains("echo user"))
+    XCTAssertFalse(String(describing: sessionStart).contains("/old/codebuddy-hook.js"))
+    XCTAssertTrue(String(describing: sessionStart).contains("/opt/homebrew/bin/node"))
+    XCTAssertTrue(String(describing: sessionStart).contains("codebuddy-hook.js"))
+    XCTAssertTrue(String(describing: sessionStart).contains("SessionStart"))
+    XCTAssertNotNil(hooks["PreCompact"])
+    let permission = try XCTUnwrap(hooks["PermissionRequest"] as? [[String: Any]])
+    XCTAssertTrue(String(describing: permission).contains("http://example.test/permission"))
+    XCTAssertTrue(String(describing: permission).contains("http://127.0.0.1:23335/permission"))
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "codebuddy"))
+    XCTAssertEqual(uninstall.status, "ok")
+    let uninstalled = try fixture.readJSON(".codebuddy/settings.json")
+    XCTAssertTrue(String(describing: uninstalled).contains("echo user"))
+    XCTAssertTrue(String(describing: uninstalled).contains("http://example.test/permission"))
+    XCTAssertFalse(String(describing: uninstalled).contains("codebuddy-hook.js"))
+    XCTAssertFalse(String(describing: uninstalled).contains("http://127.0.0.1:23335/permission"))
+  }
+
   func testCodexInstallerWritesHooksFeatureAndPermissionTimeout() throws {
     let fixture = try Fixture()
     try FileManager.default.createDirectory(at: fixture.home.appendingPathComponent(".codex"), withIntermediateDirectories: true)

@@ -33,6 +33,8 @@ public struct NativeHookRuntime {
       return geminiRoute(payload: object)
     case "cursor-agent":
       return cursorRoute(payload: object)
+    case "codebuddy":
+      return codebuddyRoute(payload: object)
     case "kiro-cli":
       return kiroRoute(payload: object)
     case "codewhale":
@@ -76,6 +78,9 @@ public struct NativeHookRuntime {
     if agentId == "qoder" { return "{}" }
     if agentId == "cursor-agent" {
       return event == "beforeSubmitPrompt" ? #"{"continue":true}"# : "{}"
+    }
+    if agentId == "codebuddy" {
+      return event == "PreToolUse" ? #"{"decision":"allow"}"# : "{}"
     }
     guard agentId == "gemini-cli" else { return nil }
     var hookEvent = event
@@ -312,6 +317,18 @@ public struct NativeHookRuntime {
     return .state(.object(body))
   }
 
+  private func codebuddyRoute(payload: [String: JSONValue]) -> Route {
+    let hookEvent = payload.string("hook_event_name") ?? event
+    guard let mapped = Self.codebuddyState[hookEvent] else { return .none }
+    return .state(.object(baseState(
+      state: mapped.state,
+      sessionId: payload.string("session_id") ?? "default",
+      event: mapped.event,
+      agentId: "codebuddy",
+      payload: payload
+    )))
+  }
+
   private func kiroRoute(payload: [String: JSONValue]) -> Route {
     let hookEvent = payload.string("hook_event_name") ?? event
     guard let mapped = Self.kiroState[hookEvent] else { return .none }
@@ -480,6 +497,8 @@ public struct NativeHookRuntime {
       return ["gemini"]
     case "cursor-agent":
       return ["cursor", "Cursor"]
+    case "codebuddy":
+      return ["codebuddy"]
     case "kiro-cli":
       return ["kiro-cli"]
     case "codewhale":
@@ -1140,6 +1159,17 @@ public struct NativeHookRuntime {
     "subagentStop": ("working", "SubagentStop"),
     "preCompact": ("sweeping", "PreCompact"),
     "afterAgentThought": ("thinking", "AfterAgentThought")
+  ]
+
+  private static let codebuddyState: [String: (state: String, event: String)] = [
+    "SessionStart": ("idle", "SessionStart"),
+    "SessionEnd": ("sleeping", "SessionEnd"),
+    "UserPromptSubmit": ("thinking", "UserPromptSubmit"),
+    "PreToolUse": ("working", "PreToolUse"),
+    "PostToolUse": ("working", "PostToolUse"),
+    "Stop": ("attention", "Stop"),
+    "Notification": ("notification", "Notification"),
+    "PreCompact": ("sweeping", "PreCompact")
   ]
 
   private static let kiroState: [String: (state: String, event: String)] = [
