@@ -35,6 +35,7 @@ final class SettingsWindowController: NSWindowController {
   private static let fieldWidth: CGFloat = 380
   private static let rowWidth: CGFloat = 560
   private static let textWidth: CGFloat = 560
+  private static let agentCardWidth: CGFloat = 600
 
   private static func formatDouble(_ value: Double) -> String {
     let rounded = (value * 1000).rounded() / 1000
@@ -220,66 +221,191 @@ final class SettingsWindowController: NSWindowController {
 
   private func addAgentsSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("agents", prefs: prefs)))
+    let list = NSStackView()
+    list.orientation = .vertical
+    list.alignment = .leading
+    list.spacing = 10
+    list.widthAnchor.constraint(equalToConstant: Self.agentCardWidth).isActive = true
     for agent in AgentRegistry.all {
-      let installed = AgentGate.isAgentIntegrationInstalled(prefs, agent.id)
-      let row = NSStackView()
-      row.orientation = .horizontal
-      row.spacing = 8
-      let enabled = NSButton(checkboxWithTitle: agent.displayName, target: self, action: #selector(toggleAgent(_:)))
-      enabled.identifier = NSUserInterfaceItemIdentifier(agent.id)
-      enabled.state = AgentGate.isAgentEnabled(prefs, agent.id) ? .on : .off
-      row.addArrangedSubview(enabled)
+      list.addArrangedSubview(agentCard(agent, prefs: prefs))
+    }
+    stack.addArrangedSubview(list)
+  }
 
+  private func agentCard(_ agent: AgentDescriptor, prefs: Preferences) -> NSView {
+    let installed = AgentGate.isAgentIntegrationInstalled(prefs, agent.id)
+    let box = NSBox()
+    box.boxType = .custom
+    box.titlePosition = .noTitle
+    box.cornerRadius = 8
+    box.borderWidth = 1
+    box.borderColor = .separatorColor
+    box.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(0.42)
+    box.widthAnchor.constraint(equalToConstant: Self.agentCardWidth).isActive = true
+
+    let content = NSStackView()
+    content.orientation = .vertical
+    content.alignment = .leading
+    content.spacing = 10
+    content.translatesAutoresizingMaskIntoConstraints = false
+    box.addSubview(content)
+
+    NSLayoutConstraint.activate([
+      content.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 12),
+      content.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
+      content.topAnchor.constraint(equalTo: box.topAnchor, constant: 10),
+      content.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -10)
+    ])
+
+    content.addArrangedSubview(agentCardHeader(agent, prefs: prefs, installed: installed))
+    content.addArrangedSubview(agentCardControls(agent, prefs: prefs))
+    return box
+  }
+
+  private func agentCardHeader(_ agent: AgentDescriptor, prefs: Preferences, installed: Bool) -> NSView {
+    let header = NSStackView()
+    header.orientation = .horizontal
+    header.alignment = .centerY
+    header.spacing = 12
+    header.widthAnchor.constraint(equalToConstant: Self.agentCardWidth - 24).isActive = true
+
+    let text = NSStackView()
+    text.orientation = .vertical
+    text.alignment = .leading
+    text.spacing = 4
+    text.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    let enabled = NSButton(checkboxWithTitle: agent.displayName, target: self, action: #selector(toggleAgent(_:)))
+    enabled.identifier = NSUserInterfaceItemIdentifier(agent.id)
+    enabled.state = AgentGate.isAgentEnabled(prefs, agent.id) ? .on : .off
+    enabled.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    enabled.cell?.lineBreakMode = .byTruncatingTail
+    text.addArrangedSubview(enabled)
+
+    let details = agentDetailsText(agent, prefs: prefs, installed: installed)
+    let detailLabel = NSTextField(wrappingLabelWithString: details)
+    detailLabel.font = NSFont.systemFont(ofSize: 11)
+    detailLabel.textColor = .secondaryLabelColor
+    detailLabel.maximumNumberOfLines = 2
+    detailLabel.lineBreakMode = .byTruncatingTail
+    detailLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 370).isActive = true
+    text.addArrangedSubview(detailLabel)
+
+    header.addArrangedSubview(text)
+    header.addArrangedSubview(spacer())
+
+    let actions = NSStackView()
+    actions.orientation = .horizontal
+    actions.alignment = .centerY
+    actions.spacing = 8
+    actions.setContentHuggingPriority(.required, for: .horizontal)
+    let canInstall = NativeIntegrationInstaller.supports(agent.id) || agent.installCommand != nil
+    let canUninstall = NativeIntegrationInstaller.supports(agent.id) || agent.uninstallCommand != nil
+    if canInstall {
+      let install = NSButton(title: localized(installed ? "repair" : "install", prefs: prefs), target: self, action: #selector(installAgentIntegration(_:)))
+      install.identifier = NSUserInterfaceItemIdentifier(agent.id)
+      install.controlSize = .small
+      actions.addArrangedSubview(install)
+    }
+    if canUninstall {
+      let uninstall = NSButton(title: localized("uninstall", prefs: prefs), target: self, action: #selector(uninstallAgentIntegration(_:)))
+      uninstall.identifier = NSUserInterfaceItemIdentifier(agent.id)
+      uninstall.controlSize = .small
+      uninstall.isEnabled = installed
+      actions.addArrangedSubview(uninstall)
+    }
+    header.addArrangedSubview(actions)
+    return header
+  }
+
+  private func agentCardControls(_ agent: AgentDescriptor, prefs: Preferences) -> NSView {
+    let controls = NSStackView()
+    controls.orientation = .horizontal
+    controls.alignment = .firstBaseline
+    controls.spacing = 14
+    controls.widthAnchor.constraint(equalToConstant: Self.agentCardWidth - 24).isActive = true
+
+    if agent.capabilities.permissionApproval || agent.capabilities.interactiveBubble {
       let permissions = NSButton(checkboxWithTitle: localized("permissionBubble", prefs: prefs), target: self, action: #selector(toggleAgentPermission(_:)))
       permissions.identifier = NSUserInterfaceItemIdentifier(agent.id)
       permissions.state = AgentGate.isAgentPermissionsEnabled(prefs, agent.id) ? .on : .off
-      permissions.isEnabled = agent.capabilities.permissionApproval
-      row.addArrangedSubview(permissions)
-
-      let notifications = NSButton(checkboxWithTitle: localized("notificationHook", prefs: prefs), target: self, action: #selector(toggleAgentNotification(_:)))
-      notifications.identifier = NSUserInterfaceItemIdentifier(agent.id)
-      notifications.state = (prefs.agents[agent.id]?.notificationHookEnabled ?? true) ? .on : .off
-      row.addArrangedSubview(notifications)
-      stack.addArrangedSubview(row)
-
-      let details = [
-        localized(installed ? "installed" : "notInstalled", prefs: prefs),
-        localized(agent.capabilities.stateOnly ? "stateOnly" : "stateAndPermission", prefs: prefs),
-        localized(agent.capabilities.terminalFocus ? "terminalFocus" : "noTerminalFocus", prefs: prefs),
-        localized(NativeIntegrationInstaller.supports(agent.id) ? "nativeInstaller" : "jsInstaller", prefs: prefs)
-      ].joined(separator: " / ")
-      stack.addArrangedSubview(NSTextField(labelWithString: "  \(agent.id): \(details)"))
-
-      let canInstall = NativeIntegrationInstaller.supports(agent.id) || agent.installCommand != nil
-      let canUninstall = NativeIntegrationInstaller.supports(agent.id) || agent.uninstallCommand != nil
-      if canInstall || canUninstall {
-        let actions = NSStackView()
-        actions.orientation = .horizontal
-        actions.spacing = 8
-        let indent = NSView()
-        indent.widthAnchor.constraint(equalToConstant: 18).isActive = true
-        actions.addArrangedSubview(indent)
-
-        let install = NSButton(title: localized(installed ? "repair" : "install", prefs: prefs), target: self, action: #selector(installAgentIntegration(_:)))
-        install.identifier = NSUserInterfaceItemIdentifier(agent.id)
-        install.isEnabled = canInstall
-        actions.addArrangedSubview(install)
-
-        let uninstall = NSButton(title: localized("uninstall", prefs: prefs), target: self, action: #selector(uninstallAgentIntegration(_:)))
-        uninstall.identifier = NSUserInterfaceItemIdentifier(agent.id)
-        uninstall.isEnabled = installed && canUninstall
-        actions.addArrangedSubview(uninstall)
-        actions.addArrangedSubview(spacer())
-        stack.addArrangedSubview(actions)
-      }
-
-      if agent.id == "claude-code" {
-        stack.addArrangedSubview(agentSubagentRow(agentId: agent.id, prefs: prefs))
-      }
-      if agent.id == "codex" {
-        stack.addArrangedSubview(textRow(label: localized("codexMode", prefs: prefs), value: prefs.agents[agent.id]?.permissionMode ?? "intercept", identifier: "agent-permissionMode-\(agent.id)", action: #selector(updateTextPreference(_:))))
-      }
+      permissions.controlSize = .small
+      controls.addArrangedSubview(permissions)
+    } else {
+      controls.addArrangedSubview(agentCapabilityPill(localized("stateOnly", prefs: prefs)))
     }
+
+    let notifications = NSButton(checkboxWithTitle: localized("notificationHook", prefs: prefs), target: self, action: #selector(toggleAgentNotification(_:)))
+    notifications.identifier = NSUserInterfaceItemIdentifier(agent.id)
+    notifications.state = (prefs.agents[agent.id]?.notificationHookEnabled ?? true) ? .on : .off
+    notifications.controlSize = .small
+    controls.addArrangedSubview(notifications)
+
+    if agent.id == "claude-code" {
+      let subagent = NSButton(checkboxWithTitle: localized("subagentPermissions", prefs: prefs), target: self, action: #selector(toggleAgentSubagent(_:)))
+      subagent.identifier = NSUserInterfaceItemIdentifier(agent.id)
+      subagent.state = (prefs.agents[agent.id]?.subagentPermissionsEnabled ?? true) ? .on : .off
+      subagent.controlSize = .small
+      controls.addArrangedSubview(subagent)
+    }
+
+    if agent.id == "codex" {
+      controls.addArrangedSubview(codexModeControl(prefs))
+    }
+
+    controls.addArrangedSubview(spacer())
+    return controls
+  }
+
+  private func agentDetailsText(_ agent: AgentDescriptor, prefs: Preferences, installed: Bool) -> String {
+    let installer = NativeIntegrationInstaller.supports(agent.id)
+      ? localized("nativeInstaller", prefs: prefs)
+      : localized("jsInstaller", prefs: prefs)
+    return [
+      agent.id,
+      localized(installed ? "installed" : "notInstalled", prefs: prefs),
+      localized(agent.capabilities.stateOnly ? "stateOnly" : "stateAndPermission", prefs: prefs),
+      localized(agent.capabilities.terminalFocus ? "terminalFocus" : "noTerminalFocus", prefs: prefs),
+      installer
+    ].joined(separator: " · ")
+  }
+
+  private func agentCapabilityPill(_ text: String) -> NSTextField {
+    let label = NSTextField(labelWithString: text)
+    label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+    label.textColor = .secondaryLabelColor
+    label.alignment = .center
+    label.wantsLayer = true
+    label.layer?.cornerRadius = 5
+    label.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.18).cgColor
+    label.widthAnchor.constraint(greaterThanOrEqualToConstant: 62).isActive = true
+    return label
+  }
+
+  private func codexModeControl(_ prefs: Preferences) -> NSView {
+    let group = NSStackView()
+    group.orientation = .horizontal
+    group.alignment = .firstBaseline
+    group.spacing = 6
+
+    let label = NSTextField(labelWithString: localized("codexMode", prefs: prefs))
+    label.font = NSFont.systemFont(ofSize: 11)
+    label.textColor = .secondaryLabelColor
+    group.addArrangedSubview(label)
+
+    let popup = NSPopUpButton()
+    popup.controlSize = .small
+    for (mode, titleKey) in [("intercept", "codexModeIntercept"), ("native", "codexModeNative")] {
+      popup.addItem(withTitle: localized(titleKey, prefs: prefs))
+      popup.lastItem?.representedObject = mode
+    }
+    selectPopupItem(popup, representedObject: prefs.agents["codex"]?.permissionMode ?? "intercept")
+    popup.identifier = NSUserInterfaceItemIdentifier("codex")
+    popup.target = self
+    popup.action = #selector(changeCodexPermissionMode(_:))
+    group.addArrangedSubview(popup)
+    return group
   }
 
   private func addIntegrationsSection(_ prefs: Preferences) {
@@ -418,13 +544,6 @@ final class SettingsWindowController: NSWindowController {
     row.addArrangedSubview(edgePopup)
     row.addArrangedSubview(spacer())
     return row
-  }
-
-  private func agentSubagentRow(agentId: String, prefs: Preferences) -> NSButton {
-    let button = NSButton(checkboxWithTitle: localized("subagentPermissions", prefs: prefs), target: self, action: #selector(toggleAgentSubagent(_:)))
-    button.identifier = NSUserInterfaceItemIdentifier(agentId)
-    button.state = (prefs.agents[agentId]?.subagentPermissionsEnabled ?? true) ? .on : .off
-    return button
   }
 
   private func addRemoteSSHSection(_ prefs: Preferences) {
@@ -938,6 +1057,15 @@ final class SettingsWindowController: NSWindowController {
     }
   }
 
+  @objc private func changeCodexPermissionMode(_ sender: NSPopUpButton) {
+    guard let mode = sender.selectedItem?.representedObject as? String else { return }
+    _ = try? preferencesStore.update { prefs in
+      var entry = prefs.agents["codex"] ?? AgentSettings()
+      entry.permissionMode = mode == "native" ? "native" : "intercept"
+      prefs.agents["codex"] = entry
+    }
+  }
+
   @objc private func toggleBubbles(_ sender: NSButton) {
     _ = try? preferencesStore.update { prefs in
       prefs.permissionBubblesEnabled = sender.state == .on
@@ -1151,6 +1279,8 @@ final class SettingsWindowController: NSWindowController {
       "install": "Install",
       "uninstall": "Uninstall",
       "codexMode": "Codex mode",
+      "codexModeIntercept": "Intercept",
+      "codexModeNative": "Native",
       "subagentPermissions": "subagent permissions",
       "manageClaudeHooksAutomatically": "Manage Claude hooks automatically",
       "autoStartWithClaude": "Auto-start with Claude",
@@ -1272,6 +1402,8 @@ final class SettingsWindowController: NSWindowController {
       "install": "安装",
       "uninstall": "卸载",
       "codexMode": "Codex 模式",
+      "codexModeIntercept": "拦截",
+      "codexModeNative": "原生",
       "subagentPermissions": "子智能体权限",
       "manageClaudeHooksAutomatically": "自动管理 Claude hooks",
       "autoStartWithClaude": "随 Claude 自动启动",
