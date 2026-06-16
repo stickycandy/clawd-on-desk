@@ -138,6 +138,14 @@ public enum AgentRegistry {
       uninstallCommand: ["node", "hooks/qwen-code-install.js", "--uninstall"]
     ),
     AgentDescriptor(
+      id: "codewhale",
+      displayName: "CodeWhale",
+      processNames: .init(win: ["codewhale.exe"], mac: ["codewhale"], linux: ["codewhale"]),
+      capabilities: .init(permissionApproval: false, interactiveBubble: false, stateOnly: true),
+      installCommand: ["node", "hooks/codewhale-install.js"],
+      uninstallCommand: ["node", "hooks/codewhale-install.js", "--uninstall"]
+    ),
+    AgentDescriptor(
       id: "opencode",
       displayName: "opencode",
       processNames: .init(win: ["opencode.exe"], mac: ["opencode"], linux: ["opencode"]),
@@ -175,6 +183,14 @@ public enum AgentRegistry {
       capabilities: .init(permissionApproval: false, interactiveBubble: false, stateOnly: true),
       installCommand: ["node", "hooks/qoder-install.js"],
       uninstallCommand: ["node", "hooks/qoder-install.js", "--uninstall"]
+    ),
+    AgentDescriptor(
+      id: "reasonix",
+      displayName: "Reasonix CLI",
+      processNames: .init(win: ["reasonix.exe"], mac: ["reasonix"], linux: ["reasonix"]),
+      capabilities: .init(permissionApproval: false, interactiveBubble: false, stateOnly: true),
+      installCommand: ["node", "hooks/reasonix-install.js"],
+      uninstallCommand: ["node", "hooks/reasonix-install.js", "--uninstall"]
     )
   ]
 

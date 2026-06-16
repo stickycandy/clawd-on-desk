@@ -179,7 +179,7 @@ Implemented:
 - Local `/state`, `/permission`, `/sessions`, and health routes.
 - Agent registry and default gates for Claude Code, Codex, Copilot, Gemini,
   Antigravity, Cursor Agent, CodeBuddy, Kiro, Kimi, Qwen, opencode, Pi,
-  OpenClaw, Hermes, and Qoder.
+  CodeWhale, OpenClaw, Hermes, Qoder, and Reasonix.
 - State priority, session tracking, DND behavior, stale cleanup, HUD snapshot
   data, and permission notification state.
 - Native AppKit desktop pet, status menu, settings window, sessions dashboard,
@@ -200,7 +200,8 @@ Implemented:
   theme timing refresh on preference changes.
 - Preference persistence in `~/.clawd/clawd-prefs-native.json`.
 - Startup integration sync wrapper that calls the existing hook/plugin
-  installers from the repository root for compatibility.
+  installers from the repository root for compatibility, gated by native
+  `integrationInstalled` and `enabled` agent preferences.
 - Theme manifest loading/validation for the existing `theme.json` format,
   including rendering, trusted scripted SVG, and layered eye-tracking metadata.
 - Theme `transitions` fade-in/fade-out support during native asset swaps.

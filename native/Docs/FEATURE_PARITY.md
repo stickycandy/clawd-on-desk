@@ -4,8 +4,8 @@
 | --- | --- | --- |
 | `src/server.js`, `/state`, `/permission` | `LocalHTTPServer` | Core hook protocol implemented |
 | `src/state.js`, `state-priority.js` | `StateEngine`, `ClawdState` | Core priority/session/DND implemented |
-| `agents/registry.js` | `AgentRegistry` | Agent ids/capabilities/install commands mirrored |
-| `src/prefs.js`, `src/agent-gate.js` | `Preferences`, `PreferencesStore`, `AgentGate` | Core schema/gates implemented |
+| `agents/registry.js` | `AgentRegistry` | Agent ids/capabilities/install commands mirrored, including CodeWhale and Reasonix |
+| `src/prefs.js`, `src/agent-gate.js` | `Preferences`, `PreferencesStore`, `AgentGate` | Core schema/gates implemented, including installed-intent gating for startup sync |
 | `src/session-alias.js` | `SessionAliasKeys` | Keying, Kiro cwd scope, TTL pruning implemented |
 | `src/permission.js` | `PermissionCoordinator`, `PermissionBubbleWindowController`, `PassiveNotificationBubbleWindowController`, `BubbleStackLayout` | Native permission/passive notification bubbles, suggestions, no-decision, follow-pet stacking, auto-close, Telegram remote approval implemented |
 | Desktop pet render/input windows | `PetWindowController`, `PetAssetView`, `IdleSleepRuntime`, `SoundRuntime` | Native transparent window, WebKit inline SVG / image document rendering with AppKit fallback, JavaScriptCore first-frame fallback for trusted scripted SVGs, DOM eye script generation, global cursor polling, Cloudling pointer bridge, fallback eye-follow, objectScale and normalized HTML layout placement, theme transition fades, idle animations, mouse-idle sleep/wake, hitTest hitboxes, drag/click reactions, completion / notification sounds implemented |

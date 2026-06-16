@@ -48,6 +48,7 @@ final class SettingsWindowController: NSWindowController {
   private let remoteSSHRuntime: RemoteSSHRuntime
   private let projectRoot: URL
   private let localPort: () -> Int?
+  private lazy var integrationManager = IntegrationManager(projectRoot: projectRoot)
   private let stack = NSStackView()
   private let documentView = SettingsDocumentView()
   private var remoteStatusObserver: UUID?
@@ -216,6 +217,7 @@ final class SettingsWindowController: NSWindowController {
   private func addAgentsSection(_ prefs: Preferences) {
     stack.addArrangedSubview(sectionTitle(localized("agents", prefs: prefs)))
     for agent in AgentRegistry.all {
+      let installed = AgentGate.isAgentIntegrationInstalled(prefs, agent.id)
       let row = NSStackView()
       row.orientation = .horizontal
       row.spacing = 8
@@ -237,11 +239,35 @@ final class SettingsWindowController: NSWindowController {
       stack.addArrangedSubview(row)
 
       let details = [
+        installed ? "installed" : "not installed",
         agent.capabilities.stateOnly ? "state-only" : "state+permission",
         agent.capabilities.terminalFocus ? "terminal focus" : "no terminal focus",
         NativeIntegrationInstaller.supports(agent.id) ? "native installer" : "JS installer"
       ].joined(separator: " / ")
       stack.addArrangedSubview(NSTextField(labelWithString: "  \(agent.id): \(details)"))
+
+      let canInstall = NativeIntegrationInstaller.supports(agent.id) || agent.installCommand != nil
+      let canUninstall = NativeIntegrationInstaller.supports(agent.id) || agent.uninstallCommand != nil
+      if canInstall || canUninstall {
+        let actions = NSStackView()
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        let indent = NSView()
+        indent.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        actions.addArrangedSubview(indent)
+
+        let install = NSButton(title: installed ? "Repair" : "Install", target: self, action: #selector(installAgentIntegration(_:)))
+        install.identifier = NSUserInterfaceItemIdentifier(agent.id)
+        install.isEnabled = canInstall
+        actions.addArrangedSubview(install)
+
+        let uninstall = NSButton(title: "Uninstall", target: self, action: #selector(uninstallAgentIntegration(_:)))
+        uninstall.identifier = NSUserInterfaceItemIdentifier(agent.id)
+        uninstall.isEnabled = installed && canUninstall
+        actions.addArrangedSubview(uninstall)
+        actions.addArrangedSubview(spacer())
+        stack.addArrangedSubview(actions)
+      }
 
       if agent.id == "claude-code" {
         stack.addArrangedSubview(agentSubagentRow(agentId: agent.id, prefs: prefs))
@@ -821,6 +847,48 @@ final class SettingsWindowController: NSWindowController {
       var entry = prefs.agents[agentId] ?? AgentSettings()
       entry.enabled = sender.state == .on
       prefs.agents[agentId] = entry
+    }
+  }
+
+  @objc private func installAgentIntegration(_ sender: NSButton) {
+    guard let agentId = sender.identifier?.rawValue else { return }
+    sender.isEnabled = false
+    let manager = integrationManager
+    DispatchQueue.global(qos: .utility).async { [weak self, preferencesStore] in
+      let result = manager.install(agentId: agentId, preferences: preferencesStore.get())
+      if result.status == "ok" {
+        _ = try? preferencesStore.update { prefs in
+          var entry = prefs.agents[agentId] ?? AgentSettings()
+          entry.integrationInstalled = true
+          entry.enabled = true
+          prefs.agents[agentId] = entry
+        }
+      }
+      Task { @MainActor in
+        sender.isEnabled = true
+        self?.showAlert("Install \(agentId): \(result.status)\n\(result.output)")
+      }
+    }
+  }
+
+  @objc private func uninstallAgentIntegration(_ sender: NSButton) {
+    guard let agentId = sender.identifier?.rawValue else { return }
+    sender.isEnabled = false
+    let manager = integrationManager
+    DispatchQueue.global(qos: .utility).async { [weak self, preferencesStore] in
+      let result = manager.uninstall(agentId: agentId)
+      if result.status == "ok" {
+        _ = try? preferencesStore.update { prefs in
+          var entry = prefs.agents[agentId] ?? AgentSettings()
+          entry.integrationInstalled = false
+          entry.enabled = false
+          prefs.agents[agentId] = entry
+        }
+      }
+      Task { @MainActor in
+        sender.isEnabled = true
+        self?.showAlert("Uninstall \(agentId): \(result.status)\n\(result.output)")
+      }
     }
   }
 

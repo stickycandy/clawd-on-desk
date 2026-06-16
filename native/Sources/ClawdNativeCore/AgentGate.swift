@@ -1,8 +1,16 @@
 import Foundation
 
 public enum AgentGate {
+  public static func isAgentIntegrationInstalled(_ snapshot: Preferences, _ agentId: String) -> Bool {
+    readFlag(snapshot, agentId, keyPath: \.integrationInstalled, defaultValue: true)
+  }
+
   public static func isAgentEnabled(_ snapshot: Preferences, _ agentId: String) -> Bool {
     readFlag(snapshot, agentId, keyPath: \.enabled, defaultValue: true)
+  }
+
+  public static func shouldSyncAgentIntegration(_ snapshot: Preferences, _ agentId: String) -> Bool {
+    isAgentIntegrationInstalled(snapshot, agentId) && isAgentEnabled(snapshot, agentId)
   }
 
   public static func isAgentPermissionsEnabled(_ snapshot: Preferences, _ agentId: String) -> Bool {

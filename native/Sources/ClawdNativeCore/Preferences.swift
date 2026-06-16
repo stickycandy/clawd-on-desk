@@ -1,6 +1,7 @@
 import Foundation
 
 public struct AgentSettings: Codable, Equatable, Sendable {
+  public var integrationInstalled: Bool
   public var enabled: Bool
   public var permissionsEnabled: Bool
   public var subagentPermissionsEnabled: Bool?
@@ -9,6 +10,7 @@ public struct AgentSettings: Codable, Equatable, Sendable {
   public var nativeNotificationSoundEnabled: Bool?
 
   public init(
+    integrationInstalled: Bool = true,
     enabled: Bool = true,
     permissionsEnabled: Bool = true,
     subagentPermissionsEnabled: Bool? = nil,
@@ -16,12 +18,31 @@ public struct AgentSettings: Codable, Equatable, Sendable {
     permissionMode: String? = nil,
     nativeNotificationSoundEnabled: Bool? = nil
   ) {
+    self.integrationInstalled = integrationInstalled
     self.enabled = enabled
     self.permissionsEnabled = permissionsEnabled
     self.subagentPermissionsEnabled = subagentPermissionsEnabled
     self.notificationHookEnabled = notificationHookEnabled
     self.permissionMode = permissionMode
     self.nativeNotificationSoundEnabled = nativeNotificationSoundEnabled
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case integrationInstalled, enabled, permissionsEnabled, subagentPermissionsEnabled
+    case notificationHookEnabled, permissionMode, nativeNotificationSoundEnabled
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      integrationInstalled: try container.decodeIfPresent(Bool.self, forKey: .integrationInstalled) ?? true,
+      enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true,
+      permissionsEnabled: try container.decodeIfPresent(Bool.self, forKey: .permissionsEnabled) ?? true,
+      subagentPermissionsEnabled: try container.decodeIfPresent(Bool.self, forKey: .subagentPermissionsEnabled),
+      notificationHookEnabled: try container.decodeIfPresent(Bool.self, forKey: .notificationHookEnabled) ?? true,
+      permissionMode: try container.decodeIfPresent(String.self, forKey: .permissionMode),
+      nativeNotificationSoundEnabled: try container.decodeIfPresent(Bool.self, forKey: .nativeNotificationSoundEnabled)
+    )
   }
 }
 
@@ -485,21 +506,23 @@ public struct Preferences: Codable, Equatable, Sendable {
 
   public static func defaultAgents() -> [String: AgentSettings] {
     [
-      "claude-code": .init(enabled: true, permissionsEnabled: true, subagentPermissionsEnabled: true),
-      "codex": .init(enabled: true, permissionsEnabled: true, permissionMode: "intercept", nativeNotificationSoundEnabled: false),
-      "copilot-cli": .init(),
-      "cursor-agent": .init(permissionsEnabled: true),
-      "gemini-cli": .init(),
-      "antigravity-cli": .init(enabled: true, permissionsEnabled: false),
-      "codebuddy": .init(),
-      "kiro-cli": .init(),
-      "kimi-cli": .init(),
-      "qwen-code": .init(),
-      "opencode": .init(),
-      "pi": .init(enabled: true, permissionsEnabled: false),
-      "openclaw": .init(enabled: true, permissionsEnabled: false),
-      "hermes": .init(),
-      "qoder": .init(enabled: true, permissionsEnabled: false)
+      "claude-code": .init(integrationInstalled: true, enabled: true, permissionsEnabled: true, subagentPermissionsEnabled: true),
+      "codex": .init(integrationInstalled: true, enabled: true, permissionsEnabled: true, permissionMode: "intercept", nativeNotificationSoundEnabled: false),
+      "copilot-cli": .init(integrationInstalled: false, enabled: false),
+      "cursor-agent": .init(integrationInstalled: false, enabled: false, permissionsEnabled: true),
+      "gemini-cli": .init(integrationInstalled: false, enabled: false),
+      "antigravity-cli": .init(integrationInstalled: false, enabled: false, permissionsEnabled: false),
+      "codebuddy": .init(integrationInstalled: false, enabled: false),
+      "kiro-cli": .init(integrationInstalled: false, enabled: false),
+      "kimi-cli": .init(integrationInstalled: false, enabled: false),
+      "qwen-code": .init(integrationInstalled: false, enabled: false),
+      "codewhale": .init(integrationInstalled: false, enabled: false, permissionsEnabled: false),
+      "opencode": .init(integrationInstalled: false, enabled: false),
+      "pi": .init(integrationInstalled: false, enabled: false, permissionsEnabled: false),
+      "openclaw": .init(integrationInstalled: false, enabled: false, permissionsEnabled: false),
+      "hermes": .init(integrationInstalled: false, enabled: false),
+      "qoder": .init(integrationInstalled: false, enabled: false, permissionsEnabled: false),
+      "reasonix": .init(integrationInstalled: false, enabled: false, permissionsEnabled: false)
     ]
   }
 

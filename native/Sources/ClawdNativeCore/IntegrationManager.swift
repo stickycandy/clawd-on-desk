@@ -25,7 +25,7 @@ public final class IntegrationManager: @unchecked Sendable {
 
   public func syncEnabledStartupIntegrations(preferences: Preferences) -> [IntegrationResult] {
     AgentRegistry.all.compactMap { descriptor in
-      guard AgentGate.isAgentEnabled(preferences, descriptor.id) else { return nil }
+      guard AgentGate.shouldSyncAgentIntegration(preferences, descriptor.id) else { return nil }
       if let native = nativeInstaller.install(agentId: descriptor.id, preferences: preferences) {
         return IntegrationResult(
           agentId: descriptor.id,
@@ -41,24 +41,24 @@ public final class IntegrationManager: @unchecked Sendable {
 
   public func repairAll(preferences: Preferences) -> [IntegrationResult] {
     AgentRegistry.all.compactMap { descriptor in
-      guard AgentGate.isAgentEnabled(preferences, descriptor.id) else { return nil }
-      if let native = nativeInstaller.install(agentId: descriptor.id, preferences: preferences) {
-        return IntegrationResult(
-          agentId: descriptor.id,
-          command: ["native", "repair", descriptor.id],
-          status: native.status,
-          output: native.output
-        )
-      }
-      return repair(agentId: descriptor.id)
+      guard AgentGate.shouldSyncAgentIntegration(preferences, descriptor.id) else { return nil }
+      return install(agentId: descriptor.id, preferences: preferences, action: "repair")
     }
   }
 
+  public func install(agentId: String, preferences: Preferences) -> IntegrationResult {
+    install(agentId: agentId, preferences: preferences, action: "install")
+  }
+
   public func repair(agentId: String) -> IntegrationResult {
-    if let native = nativeInstaller.install(agentId: agentId, preferences: Preferences()) {
+    install(agentId: agentId, preferences: Preferences(), action: "repair")
+  }
+
+  private func install(agentId: String, preferences: Preferences, action: String) -> IntegrationResult {
+    if let native = nativeInstaller.install(agentId: agentId, preferences: preferences) {
       return IntegrationResult(
         agentId: agentId,
-        command: ["native", "repair", agentId],
+        command: ["native", action, agentId],
         status: native.status,
         output: native.output
       )
