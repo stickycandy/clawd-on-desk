@@ -379,6 +379,43 @@ final class NativeIntegrationInstallerTests: XCTestCase {
     XCTAssertNil(uninstalledEntries["clawd-on-desk"])
   }
 
+  func testOpencodeInstallerUpdatesStalePluginPathAndUninstallsExactEntry() throws {
+    let fixture = try Fixture()
+    try fixture.writeJSON([
+      "plugin": [
+        "opencode-wakatime",
+        "@vendor/opencode-plugin",
+        "/old/opencode-plugin"
+      ]
+    ], to: ".config/opencode/opencode.json")
+
+    let installer = NativeIntegrationInstaller(
+      projectRoot: fixture.projectRoot,
+      homeDirectory: fixture.home,
+      environment: [:]
+    )
+    let summary = try XCTUnwrap(installer.install(agentId: "opencode", preferences: Preferences()))
+    XCTAssertEqual(summary.status, "ok")
+    XCTAssertEqual(summary.added, 1)
+
+    let installed = try fixture.readJSON(".config/opencode/opencode.json")
+    let plugins = try XCTUnwrap(installed["plugin"] as? [String])
+    XCTAssertEqual(plugins, [
+      "opencode-wakatime",
+      "@vendor/opencode-plugin",
+      "\(fixture.projectRoot.path)/hooks/opencode-plugin"
+    ])
+
+    let uninstall = try XCTUnwrap(installer.uninstall(agentId: "opencode"))
+    XCTAssertEqual(uninstall.status, "ok")
+    XCTAssertEqual(uninstall.removed, 1)
+    let uninstalled = try fixture.readJSON(".config/opencode/opencode.json")
+    XCTAssertEqual(try XCTUnwrap(uninstalled["plugin"] as? [String]), [
+      "opencode-wakatime",
+      "@vendor/opencode-plugin"
+    ])
+  }
+
   func testCursorInstallerPreservesUserHooksAndUninstallsManagedEntries() throws {
     let fixture = try Fixture()
     try fixture.writeJSON([

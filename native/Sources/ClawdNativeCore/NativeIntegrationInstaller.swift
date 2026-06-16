@@ -60,6 +60,7 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
     "kimi-cli",
     "pi",
     "openclaw",
+    "opencode",
     "kiro-cli",
     "codewhale",
     "qwen-code",
@@ -114,6 +115,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try installPi()
       case "openclaw":
         return try installOpenClaw()
+      case "opencode":
+        return try installOpencode()
       case "kiro-cli":
         return try installKiro()
       case "codewhale":
@@ -161,6 +164,8 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
         return try uninstallPi()
       case "openclaw":
         return try uninstallOpenClaw()
+      case "opencode":
+        return try uninstallOpencode()
       case "kiro-cli":
         return try uninstallKiro()
       case "codewhale":
@@ -761,6 +766,78 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       message: "Swift OpenClaw plugin removed from \(paths.configPath.path)",
       skipped: removed ? 0 : 1,
       removed: removed ? 1 : 0
+    )
+  }
+
+  private func installOpencode() throws -> NativeIntegrationSummary {
+    let configDir = homeDirectory.appendingPathComponent(".config/opencode", isDirectory: true)
+    let configPath = configDir.appendingPathComponent("opencode.json")
+    let pluginDir = projectRoot.appendingPathComponent("hooks/opencode-plugin", isDirectory: true).path
+    guard fileManager.fileExists(atPath: configDir.path) else {
+      return .init(agentId: "opencode", action: "install", status: "skip", message: "\(configDir.path) not found")
+    }
+
+    var settings: [String: Any]
+    var created = false
+    if fileManager.fileExists(atPath: configPath.path) {
+      settings = try readJSONObject(configPath, missingIsEmpty: false)
+    } else {
+      settings = ["$schema": "https://opencode.ai/config.json"]
+      created = true
+    }
+    var plugins = settings["plugin"] as? [Any] ?? []
+    let index = opencodePluginIndex(plugins, pluginDir: pluginDir)
+    let changed: Bool
+    if let index {
+      if plugins[index] as? String == pluginDir {
+        changed = false
+      } else {
+        plugins[index] = pluginDir
+        changed = true
+      }
+    } else {
+      plugins.append(pluginDir)
+      changed = true
+    }
+    settings["plugin"] = plugins
+    if changed || created {
+      try writeJSONObject(settings, to: configPath)
+    }
+    return NativeIntegrationSummary(
+      agentId: "opencode",
+      action: "install",
+      status: "ok",
+      message: "Swift opencode plugin -> \(configPath.path)",
+      added: changed ? 1 : 0,
+      skipped: changed ? 0 : 1
+    )
+  }
+
+  private func uninstallOpencode() throws -> NativeIntegrationSummary {
+    let configPath = homeDirectory.appendingPathComponent(".config/opencode/opencode.json")
+    let pluginDir = projectRoot.appendingPathComponent("hooks/opencode-plugin", isDirectory: true).path
+    var settings = try readJSONObject(configPath, missingIsEmpty: false)
+    guard var plugins = settings["plugin"] as? [Any] else {
+      return .init(agentId: "opencode", action: "uninstall", status: "ok", message: "Swift opencode plugin not installed", skipped: 1)
+    }
+    let before = plugins.count
+    let normalizedPluginDir = normalizeOpenClawPath(pluginDir)
+    plugins = plugins.filter { entry in
+      guard let string = entry as? String else { return true }
+      return normalizeOpenClawPath(string) != normalizedPluginDir
+    }
+    let removed = before - plugins.count
+    if removed > 0 {
+      settings["plugin"] = plugins
+      try writeJSONObject(settings, to: configPath, backup: true)
+    }
+    return NativeIntegrationSummary(
+      agentId: "opencode",
+      action: "uninstall",
+      status: "ok",
+      message: "Swift opencode plugin removed from \(configPath.path)",
+      skipped: removed > 0 ? 0 : 1,
+      removed: removed
     )
   }
 
@@ -1435,6 +1512,19 @@ public final class NativeIntegrationInstaller: @unchecked Sendable {
       let normalized = normalizeOpenClawPath(path)
       if normalized == normalizedPluginDir { return index }
       if openClawPathLooksAbsolute(normalized), URL(fileURLWithPath: normalized).lastPathComponent == "openclaw-plugin" {
+        return index
+      }
+    }
+    return nil
+  }
+
+  private func opencodePluginIndex(_ plugins: [Any], pluginDir: String) -> Int? {
+    let normalizedPluginDir = normalizeOpenClawPath(pluginDir)
+    for (index, entry) in plugins.enumerated() {
+      guard let string = entry as? String else { continue }
+      let normalized = normalizeOpenClawPath(string)
+      if normalized == normalizedPluginDir { return index }
+      if openClawPathLooksAbsolute(normalized), URL(fileURLWithPath: normalized).lastPathComponent == "opencode-plugin" {
         return index
       }
     }
