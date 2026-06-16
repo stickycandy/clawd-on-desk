@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       dashboard: dashboard,
       settings: settings,
       preferencesStore: preferencesStore,
+      projectRoot: projectRoot,
       syncHandler: { [weak self] in self?.syncIntegrations() },
       repairHandler: { [weak self] in self?.repairIntegrations() },
       cleanupHandler: { [weak self] in self?.cleanupIntegrations() },

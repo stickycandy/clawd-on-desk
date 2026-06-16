@@ -3,9 +3,10 @@ import ClawdNativeCore
 
 @MainActor
 final class PermissionBubbleWindowController: NSWindowController, NSWindowDelegate {
-  private static let bubbleWidth: CGFloat = 420
-  private static let contentWidth: CGFloat = 388
+  private static let bubbleWidth: CGFloat = 360
+  private static let contentWidth: CGFloat = 336
   private var permission: PendingPermission?
+  private let lang: String
   private var resolved = false
   private var autoCloseTimer: Timer?
   private static var visible: [PermissionBubbleWindowController] = []
@@ -17,7 +18,7 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
       permission.resolve(.noDecision)
       return
     }
-    let controller = PermissionBubbleWindowController(permission: permission)
+    let controller = PermissionBubbleWindowController(permission: permission, preferences: preferences)
     visible.append(controller)
     controller.showWindow(nil)
     controller.window?.makeKeyAndOrderFront(nil)
@@ -72,8 +73,9 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     }
   }
 
-  init(permission: PendingPermission) {
+  init(permission: PendingPermission, preferences: Preferences) {
     self.permission = permission
+    self.lang = preferences.lang
     let window = NSPanel(
       contentRect: NSRect(x: 0, y: 0, width: Self.bubbleWidth, height: Self.estimatedHeight(for: permission.request)),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -128,21 +130,21 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
   }
 
   private func buildView(_ permission: PendingPermission) -> NSView {
-    let summary = PermissionDisplaySummary(request: permission.request)
+    let summary = PermissionDisplaySummary(request: permission.request, lang: lang)
     let visual = NSVisualEffectView()
-    visual.material = .hudWindow
+    visual.material = .popover
     visual.blendingMode = .behindWindow
     visual.state = .active
     visual.wantsLayer = true
-    visual.layer?.cornerRadius = 14
+    visual.layer?.cornerRadius = 12
     visual.layer?.masksToBounds = true
     visual.layer?.borderWidth = 1
     visual.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
 
     let root = NSStackView()
     root.orientation = .vertical
-    root.spacing = 10
-    root.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 14, right: 16)
+    root.spacing = 8
+    root.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 10, right: 12)
     root.translatesAutoresizingMaskIntoConstraints = false
     visual.addSubview(root)
     NSLayoutConstraint.activate([
@@ -155,42 +157,42 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
 
     let header = NSStackView()
     header.orientation = .horizontal
-    header.alignment = .top
-    header.spacing = 10
+    header.alignment = .centerY
+    header.spacing = 8
 
     header.addArrangedSubview(pill(summary.agentLabel, color: NSColor(calibratedRed: 0.16, green: 0.39, blue: 0.95, alpha: 1)))
 
     let titleBlock = NSStackView()
     titleBlock.orientation = .vertical
     titleBlock.alignment = .leading
-    titleBlock.spacing = 3
+    titleBlock.spacing = 2
     titleBlock.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-    let title = textLabel("Permission request", size: 14, weight: .semibold, color: .labelColor, lines: 1)
+    let title = textLabel(localized("permissionRequest"), size: 13, weight: .semibold, color: .labelColor, lines: 1)
     titleBlock.addArrangedSubview(title)
 
-    let subtitle = textLabel(summary.subtitle, size: 12, weight: .regular, color: .secondaryLabelColor, lines: 2)
-    subtitle.widthAnchor.constraint(lessThanOrEqualToConstant: 310).isActive = true
+    let subtitle = textLabel(summary.subtitle, size: 11, weight: .regular, color: .secondaryLabelColor, lines: 1)
+    subtitle.widthAnchor.constraint(lessThanOrEqualToConstant: 270).isActive = true
     titleBlock.addArrangedSubview(subtitle)
     header.addArrangedSubview(titleBlock)
     root.addArrangedSubview(header)
 
     if let description = summary.description {
-      let descriptionLabel = textLabel(description, size: 12, weight: .regular, color: .labelColor, lines: 4)
+      let descriptionLabel = textLabel(description, size: 11.5, weight: .regular, color: .labelColor, lines: 3)
       descriptionLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
       root.addArrangedSubview(descriptionLabel)
     }
 
     if let command = summary.command {
-      root.addArrangedSubview(codeBlock(title: "Command", body: command, height: 54))
+      root.addArrangedSubview(codeBlock(title: localized("command"), body: command, height: 46))
+    } else {
+      root.addArrangedSubview(codeBlock(title: localized("rawInput"), body: summary.rawInput, height: 58, subtle: true))
     }
-
-    root.addArrangedSubview(codeBlock(title: "Raw input", body: summary.rawInput, height: 74, subtle: true))
 
     if !permission.request.suggestions.isEmpty {
       let suggestions = NSStackView()
       suggestions.orientation = .vertical
-      suggestions.spacing = 6
+      suggestions.spacing = 5
       for suggestion in permission.request.suggestions {
         let button = SuggestionButton()
         button.title = PermissionSuggestionFormatter.label(for: suggestion)
@@ -208,14 +210,11 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     let buttons = NSStackView()
     buttons.orientation = .horizontal
     buttons.alignment = .centerY
-    buttons.spacing = 8
+    buttons.spacing = 6
     buttons.addArrangedSubview(NSView())
-    let terminal = NSButton(title: "Use Terminal", target: self, action: #selector(noDecision))
-    let deny = NSButton(title: "Deny", target: self, action: #selector(deny))
-    let allow = NSButton(title: "Allow", target: self, action: #selector(allow))
-    terminal.bezelStyle = .rounded
-    deny.bezelStyle = .rounded
-    allow.bezelStyle = .rounded
+    let terminal = actionButton(localized("useTerminal"), action: #selector(noDecision), width: 92)
+    let deny = actionButton(localized("deny"), action: #selector(deny), width: 58)
+    let allow = actionButton(localized("allow"), action: #selector(allow), width: 58)
     allow.keyEquivalent = "\r"
     buttons.addArrangedSubview(terminal)
     buttons.addArrangedSubview(deny)
@@ -226,16 +225,16 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
   }
 
   private var estimatedHeight: CGFloat {
-    guard let permission else { return 276 }
+    guard let permission else { return 190 }
     return Self.estimatedHeight(for: permission.request)
   }
 
   private static func estimatedHeight(for request: PermissionRequest) -> CGFloat {
-    let summary = PermissionDisplaySummary(request: request)
-    let descriptionHeight: CGFloat = summary.description == nil ? 0 : 42
-    let commandHeight: CGFloat = summary.command == nil ? 0 : 64
-    let suggestionsHeight = CGFloat(request.suggestions.count) * 34
-    return min(420, max(276, 214 + descriptionHeight + commandHeight + suggestionsHeight))
+    let summary = PermissionDisplaySummary(request: request, lang: "en")
+    let descriptionHeight: CGFloat = summary.description == nil ? 0 : 34
+    let inputHeight: CGFloat = summary.command == nil ? 66 : 54
+    let suggestionsHeight = CGFloat(request.suggestions.count) * 30
+    return min(320, max(182, 98 + descriptionHeight + inputHeight + suggestionsHeight))
   }
 
   private func textLabel(_ text: String, size: CGFloat, weight: NSFont.Weight, color: NSColor, lines: Int) -> NSTextField {
@@ -249,27 +248,36 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
 
   private func pill(_ text: String, color: NSColor) -> NSTextField {
     let label = NSTextField(labelWithString: text)
-    label.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+    label.font = NSFont.systemFont(ofSize: 9, weight: .bold)
     label.textColor = .white
     label.alignment = .center
     label.wantsLayer = true
     label.layer?.backgroundColor = color.cgColor
-    label.layer?.cornerRadius = 5
-    label.widthAnchor.constraint(greaterThanOrEqualToConstant: 54).isActive = true
-    label.heightAnchor.constraint(equalToConstant: 22).isActive = true
+    label.layer?.cornerRadius = 4
+    label.widthAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+    label.heightAnchor.constraint(equalToConstant: 19).isActive = true
     return label
+  }
+
+  private func actionButton(_ title: String, action: Selector, width: CGFloat) -> NSButton {
+    let button = NSButton(title: title, target: self, action: action)
+    button.bezelStyle = .rounded
+    button.controlSize = .small
+    button.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+    button.widthAnchor.constraint(equalToConstant: width).isActive = true
+    return button
   }
 
   private func codeBlock(title: String, body: String, height: CGFloat, subtle: Bool = false) -> NSView {
     let box = NSBox()
     box.boxType = .custom
     box.titlePosition = .noTitle
-    box.cornerRadius = 8
+    box.cornerRadius = 7
     box.borderWidth = 1
     box.borderColor = NSColor.separatorColor.withAlphaComponent(subtle ? 0.35 : 0.55)
     box.fillColor = subtle
       ? NSColor.textBackgroundColor.withAlphaComponent(0.10)
-      : NSColor.controlBackgroundColor.withAlphaComponent(0.32)
+      : NSColor.controlBackgroundColor.withAlphaComponent(0.26)
     box.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
     box.heightAnchor.constraint(equalToConstant: height).isActive = true
 
@@ -280,24 +288,24 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     stack.translatesAutoresizingMaskIntoConstraints = false
     box.addSubview(stack)
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
-      stack.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
-      stack.topAnchor.constraint(equalTo: box.topAnchor, constant: 7),
-      stack.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -7)
+      stack.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 9),
+      stack.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -9),
+      stack.topAnchor.constraint(equalTo: box.topAnchor, constant: 6),
+      stack.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -6)
     ])
 
     let heading = NSTextField(labelWithString: title)
-    heading.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+    heading.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
     heading.textColor = .tertiaryLabelColor
     stack.addArrangedSubview(heading)
 
-    let input = NSTextView(frame: NSRect(x: 0, y: 0, width: Self.contentWidth - 20, height: height - 28))
+    let input = NSTextView(frame: NSRect(x: 0, y: 0, width: Self.contentWidth - 18, height: height - 24))
     input.string = body
     input.isEditable = false
     input.isSelectable = true
     input.drawsBackground = false
-    input.font = NSFont.monospacedSystemFont(ofSize: subtle ? 10 : 11, weight: .regular)
-    input.textColor = subtle ? .secondaryLabelColor : .labelColor
+    input.font = NSFont.monospacedSystemFont(ofSize: subtle ? 9.5 : 10.5, weight: .regular)
+    input.textColor = subtle ? .tertiaryLabelColor : .labelColor
     input.textContainerInset = NSSize(width: 0, height: 0)
     input.textContainer?.lineFragmentPadding = 0
 
@@ -307,11 +315,59 @@ final class PermissionBubbleWindowController: NSWindowController, NSWindowDelega
     scroll.drawsBackground = false
     scroll.borderType = .noBorder
     scroll.documentView = input
-    scroll.widthAnchor.constraint(equalToConstant: Self.contentWidth - 20).isActive = true
-    scroll.heightAnchor.constraint(equalToConstant: height - 28).isActive = true
+    scroll.widthAnchor.constraint(equalToConstant: Self.contentWidth - 18).isActive = true
+    scroll.heightAnchor.constraint(equalToConstant: height - 24).isActive = true
     stack.addArrangedSubview(scroll)
     return box
   }
+
+  private func localized(_ key: String) -> String {
+    let table = Self.localizedStrings[lang] ?? Self.localizedStrings["en"] ?? [:]
+    return table[key] ?? Self.localizedStrings["en"]?[key] ?? key
+  }
+
+  private static let localizedStrings: [String: [String: String]] = [
+    "en": [
+      "permissionRequest": "Permission request",
+      "command": "Command",
+      "rawInput": "Raw input",
+      "useTerminal": "Use Terminal",
+      "deny": "Deny",
+      "allow": "Allow"
+    ],
+    "zh": [
+      "permissionRequest": "权限请求",
+      "command": "命令",
+      "rawInput": "原始输入",
+      "useTerminal": "终端处理",
+      "deny": "拒绝",
+      "allow": "允许"
+    ],
+    "zh-TW": [
+      "permissionRequest": "權限請求",
+      "command": "命令",
+      "rawInput": "原始輸入",
+      "useTerminal": "終端處理",
+      "deny": "拒絕",
+      "allow": "允許"
+    ],
+    "ko": [
+      "permissionRequest": "권한 요청",
+      "command": "명령",
+      "rawInput": "원본 입력",
+      "useTerminal": "터미널 사용",
+      "deny": "거부",
+      "allow": "허용"
+    ],
+    "ja": [
+      "permissionRequest": "権限リクエスト",
+      "command": "コマンド",
+      "rawInput": "元の入力",
+      "useTerminal": "端末で処理",
+      "deny": "拒否",
+      "allow": "許可"
+    ]
+  ]
 
   private func armAutoClose(preferences: Preferences) {
     autoCloseTimer?.invalidate()
@@ -348,14 +404,29 @@ private struct PermissionDisplaySummary {
   var command: String?
   var rawInput: String
 
-  init(request: PermissionRequest) {
+  init(request: PermissionRequest, lang: String) {
     let agentName = Self.displayName(request.agentId)
     let toolName = Self.displayName(request.toolName)
     self.agentLabel = String(request.agentId.uppercased().prefix(8))
-    self.subtitle = "\(agentName) wants to use \(toolName)"
+    self.subtitle = Self.subtitle(agentName: agentName, toolName: toolName, lang: lang)
     self.command = Self.commandText(from: request.toolInput)
     self.description = Self.descriptionText(from: request)
     self.rawInput = Self.prettyInput(request.toolInput)
+  }
+
+  private static func subtitle(agentName: String, toolName: String, lang: String) -> String {
+    switch lang {
+    case "zh":
+      return "\(agentName) 请求使用 \(toolName)"
+    case "zh-TW":
+      return "\(agentName) 請求使用 \(toolName)"
+    case "ko":
+      return "\(agentName)이(가) \(toolName)을(를) 사용하려고 합니다"
+    case "ja":
+      return "\(agentName) が \(toolName) を使用しようとしています"
+    default:
+      return "\(agentName) wants to use \(toolName)"
+    }
   }
 
   private static func displayName(_ value: String) -> String {

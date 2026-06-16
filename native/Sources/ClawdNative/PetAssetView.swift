@@ -9,7 +9,6 @@ final class PetAssetView: NSView {
   private var webView: WKWebView
   private let fallbackView = PetView(frame: .zero)
   private let imageView = NSImageView(frame: .zero)
-  private let badgeView = PetBadgeView(frame: .zero)
   private var lastAssetKey: String?
   private var activeFileName: String?
   private var activeImageFileName: String?
@@ -52,7 +51,6 @@ final class PetAssetView: NSView {
   var snapshot = StateSnapshot(currentState: .idle, sessions: [], updatedAt: Date()) {
     didSet {
       fallbackView.snapshot = snapshot
-      badgeView.snapshot = snapshot
       render()
     }
   }
@@ -71,7 +69,6 @@ final class PetAssetView: NSView {
     imageView.isHidden = true
     addSubview(fallbackView)
     addSubview(imageView)
-    addSubview(badgeView)
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(preferencesDidChange),
@@ -126,7 +123,6 @@ final class PetAssetView: NSView {
       imageView.frame = bounds
     }
     pendingWebView?.frame = bounds
-    badgeView.frame = bounds
     applyMiniClip()
   }
 
@@ -244,7 +240,7 @@ final class PetAssetView: NSView {
     let next = Self.makeWebView(frame: bounds)
     next.alphaValue = Self.loadingWebAlpha
     next.isHidden = false
-    addSubview(next, positioned: .below, relativeTo: badgeView)
+    addSubview(next, positioned: .below, relativeTo: imageView)
 
     pendingAsset = asset
     pendingAssetKey = key
@@ -824,29 +820,5 @@ private final class PetAssetWebNavigationDelegate: NSObject, WKNavigationDelegat
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
     completion()
-  }
-}
-
-@MainActor
-final class PetBadgeView: NSView {
-  var snapshot = StateSnapshot(currentState: .idle, sessions: [], updatedAt: Date()) {
-    didSet { needsDisplay = true }
-  }
-
-  override var mouseDownCanMoveWindow: Bool { true }
-
-  override func draw(_ dirtyRect: NSRect) {
-    super.draw(dirtyRect)
-    guard let top = snapshot.sessions.first(where: { $0.visibleInHUD }) else { return }
-    let label = "\(top.metadata.agentId) \(top.badge)"
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-      .foregroundColor: NSColor.white
-    ]
-    let size = label.size(withAttributes: attributes)
-    let badgeRect = NSRect(x: bounds.midX - size.width / 2 - 10, y: bounds.maxY - 34, width: size.width + 20, height: 22)
-    NSColor.black.withAlphaComponent(0.64).setFill()
-    NSBezierPath(roundedRect: badgeRect, xRadius: 6, yRadius: 6).fill()
-    label.draw(at: NSPoint(x: badgeRect.minX + 10, y: badgeRect.minY + 4), withAttributes: attributes)
   }
 }

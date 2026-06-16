@@ -583,7 +583,6 @@ final class PetView: NSView {
     drawShadow(in: rect)
     drawBody(in: rect, state: snapshot.currentState)
     drawFace(in: rect, state: snapshot.currentState)
-    drawBadge(in: rect)
   }
 
   private func drawShadow(in rect: NSRect) {
@@ -662,20 +661,6 @@ final class PetView: NSView {
     mouth.lineCapStyle = .round
     NSColor.black.withAlphaComponent(0.70).setStroke()
     mouth.stroke()
-  }
-
-  private func drawBadge(in rect: NSRect) {
-    guard let top = snapshot.sessions.first(where: { $0.visibleInHUD }) else { return }
-    let label = "\(top.metadata.agentId) \(top.badge)"
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-      .foregroundColor: NSColor.white
-    ]
-    let size = label.size(withAttributes: attributes)
-    let badgeRect = NSRect(x: bounds.midX - size.width / 2 - 10, y: bounds.maxY - 34, width: size.width + 20, height: 22)
-    NSColor.black.withAlphaComponent(0.64).setFill()
-    NSBezierPath(roundedRect: badgeRect, xRadius: 6, yRadius: 6).fill()
-    label.draw(at: NSPoint(x: badgeRect.minX + 10, y: badgeRect.minY + 4), withAttributes: attributes)
   }
 
   private func bodyColor(for state: ClawdState) -> NSColor {
