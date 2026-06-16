@@ -346,6 +346,24 @@ final class RuntimeSurfaceTests: XCTestCase {
     XCTAssertEqual(ready.status, "ok")
   }
 
+  func testDiagnosticsReportInstalledAgentIntentCounts() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("clawd-native-agent-gates-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("hooks", isDirectory: true), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("themes", isDirectory: true), withIntermediateDirectories: true)
+
+    let report = Diagnostics.localReport(
+      serverPort: 23333,
+      preferencesURL: root.appendingPathComponent("prefs.json"),
+      projectRoot: root,
+      preferences: Preferences()
+    )
+    let gates = try XCTUnwrap(report.first { $0.id == "agent-gates" })
+    XCTAssertTrue(gates.message.contains("2 installed"))
+    XCTAssertTrue(gates.message.contains("2 startup-sync eligible"))
+  }
+
   func testUpdaterAheadBehindParser() {
     XCTAssertEqual(UpdaterRuntime.parseAheadBehind("ahead 0\tbehind 3")?.behind, 3)
     XCTAssertEqual(UpdaterRuntime.parseAheadBehind("ahead 2\tbehind 0")?.ahead, 2)

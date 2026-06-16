@@ -49,7 +49,17 @@ public enum Diagnostics {
       items.append(.init(id: "theme-health", status: "warning", message: "\(preferences.theme) could not be validated"))
     }
     let enabledAgents = AgentRegistry.all.filter { AgentGate.isAgentEnabled(preferences, $0.id) }
-    items.append(.init(id: "agent-gates", status: "ok", message: "\(enabledAgents.count)/\(AgentRegistry.all.count) agents enabled"))
+    let installedAgents = AgentRegistry.all.filter { AgentGate.isAgentIntegrationInstalled(preferences, $0.id) }
+    let startupSyncAgents = AgentRegistry.all.filter { AgentGate.shouldSyncAgentIntegration(preferences, $0.id) }
+    items.append(.init(
+      id: "agent-gates",
+      status: "ok",
+      message: [
+        "\(enabledAgents.count)/\(AgentRegistry.all.count) agents enabled",
+        "\(installedAgents.count) installed",
+        "\(startupSyncAgents.count) startup-sync eligible"
+      ].joined(separator: ", ")
+    ))
     let hooksDir = projectRoot.appendingPathComponent("hooks", isDirectory: true)
     let missingInstallers = AgentRegistry.all.compactMap { agent -> String? in
       guard let command = agent.installCommand, command.count >= 2 else { return nil }
