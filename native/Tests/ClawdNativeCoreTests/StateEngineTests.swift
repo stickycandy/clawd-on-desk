@@ -80,6 +80,25 @@ final class StateEngineTests: XCTestCase {
     XCTAssertEqual(doneEngine.current(), .attention)
   }
 
+  func testSuppressedOneShotVisualKeepsBookkeepingWithoutChangingCurrentState() {
+    let engine = StateEngine()
+    engine.updateSession(
+      "input",
+      state: .notification,
+      event: "Notification",
+      metadata: SessionMetadata(agentId: "qoder"),
+      suppressOneShotVisual: true
+    )
+
+    let snapshot = engine.snapshot()
+    let session = snapshot.sessions.first { $0.id == "input" }
+    XCTAssertEqual(snapshot.currentState, .idle)
+    XCTAssertEqual(session?.state, .idle)
+    XCTAssertEqual(session?.event, "Notification")
+    XCTAssertEqual(session?.badge, "Input")
+    XCTAssertEqual(engine.current(), .idle)
+  }
+
   func testMouseSleepSequenceAdvancesAndWakes() {
     let engine = StateEngine(timings: StateTiming(
       autoReturnMs: [:],

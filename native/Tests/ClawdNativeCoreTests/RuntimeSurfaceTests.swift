@@ -103,6 +103,96 @@ final class RuntimeSurfaceTests: XCTestCase {
     XCTAssertEqual(httpBody(response), Data(), text)
   }
 
+  func testStateNotificationHookFlagMutesPetVisualButKeepsSession() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("clawd-native-notification-muted-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    let prefs = {
+      var copy = Preferences()
+      copy.agents["qoder"] = AgentSettings(
+        integrationInstalled: true,
+        enabled: true,
+        permissionsEnabled: false,
+        notificationHookEnabled: false
+      )
+      return copy
+    }()
+    let engine = StateEngine()
+    let server = LocalHTTPServer(
+      engine: engine,
+      preferences: { prefs },
+      permissions: PermissionCoordinator(),
+      runtimeConfigURL: root.appendingPathComponent("runtime.json")
+    )
+    defer { server.stop() }
+    let port = try startServer(server, ports: Array(26600..<26700))
+
+    let body = #"{"state":"notification","session_id":"qoder:s1","event":"Notification","agent_id":"qoder","tool_name":"approval"}"#
+    let response = try tcpHTTPExchange(port: port, parts: [httpRequest(method: "POST", path: "/state", port: port, body: body)])
+    let text = String(decoding: response, as: UTF8.self)
+    XCTAssertTrue(text.contains("HTTP/1.1 200 OK"), text)
+
+    let sessionsResponse = try tcpHTTPExchange(
+      port: port,
+      parts: [Data("GET /sessions HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nConnection: close\r\n\r\n".utf8)]
+    )
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let snapshot = try decoder.decode(StateSnapshot.self, from: httpBody(sessionsResponse))
+    let session = try XCTUnwrap(snapshot.sessions.first { $0.id == "qoder:s1" })
+    XCTAssertEqual(snapshot.currentState, .idle)
+    XCTAssertEqual(session.state, .idle)
+    XCTAssertEqual(session.event, "Notification")
+    XCTAssertEqual(session.badge, "Input")
+  }
+
+  func testStateNotificationHookFlagAllowsPetVisualWhenEnabled() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("clawd-native-notification-enabled-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    let prefs = {
+      var copy = Preferences()
+      copy.agents["qoder"] = AgentSettings(
+        integrationInstalled: true,
+        enabled: true,
+        permissionsEnabled: false,
+        notificationHookEnabled: true
+      )
+      return copy
+    }()
+    let engine = StateEngine()
+    let server = LocalHTTPServer(
+      engine: engine,
+      preferences: { prefs },
+      permissions: PermissionCoordinator(),
+      runtimeConfigURL: root.appendingPathComponent("runtime.json")
+    )
+    defer { server.stop() }
+    let port = try startServer(server, ports: Array(26700..<26800))
+
+    let body = #"{"state":"notification","session_id":"qoder:s1","event":"Notification","agent_id":"qoder","tool_name":"approval"}"#
+    let response = try tcpHTTPExchange(port: port, parts: [httpRequest(method: "POST", path: "/state", port: port, body: body)])
+    let text = String(decoding: response, as: UTF8.self)
+    XCTAssertTrue(text.contains("HTTP/1.1 200 OK"), text)
+
+    let sessionsResponse = try tcpHTTPExchange(
+      port: port,
+      parts: [Data("GET /sessions HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nConnection: close\r\n\r\n".utf8)]
+    )
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let snapshot = try decoder.decode(StateSnapshot.self, from: httpBody(sessionsResponse))
+    let session = try XCTUnwrap(snapshot.sessions.first { $0.id == "qoder:s1" })
+    XCTAssertEqual(snapshot.currentState, .notification)
+    XCTAssertEqual(session.state, .idle)
+    XCTAssertEqual(session.event, "Notification")
+    XCTAssertEqual(session.badge, "Input")
+  }
+
   func testMobilePreviewRouteRequiresEnabledPreference() throws {
     let root = FileManager.default.temporaryDirectory
       .appendingPathComponent("clawd-native-mobile-preview-\(UUID().uuidString)", isDirectory: true)

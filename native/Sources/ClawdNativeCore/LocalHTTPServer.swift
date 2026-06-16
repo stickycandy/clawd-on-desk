@@ -230,6 +230,7 @@ public final class LocalHTTPServer: @unchecked Sendable {
       let prefs = preferences()
       let agentId = payload.agentId?.trimmedNonEmpty ?? "claude-code"
       let sessionId = payload.sessionId?.trimmedNonEmpty ?? "default"
+      let event = payload.event?.trimmedNonEmpty
       guard AgentGate.isAgentEnabled(prefs, agentId) else {
         send(connection, status: 204, bodyData: Data())
         return
@@ -239,8 +240,11 @@ public final class LocalHTTPServer: @unchecked Sendable {
         return
       }
       let isPassivePermissionEvent = state == .notification
-        && payload.event?.trimmedNonEmpty == "PermissionRequest"
+        && event == "PermissionRequest"
         && Self.passivePermissionAgents.contains(agentId)
+      let suppressNotificationVisual = event == "Notification"
+        && (state == .notification || state == .attention)
+        && !AgentGate.isAgentNotificationHookEnabled(prefs, agentId)
       let isCodexSubagent = Self.codexRoleMarksHeadless(
         agentId: agentId,
         hookSource: payload.hookSource,
@@ -286,7 +290,13 @@ public final class LocalHTTPServer: @unchecked Sendable {
       if let svg = payload.svg?.lastPathComponent, !svg.isEmpty {
         engine.setState(state)
       } else {
-        engine.updateSession(sessionId, state: state, event: payload.event, metadata: metadata)
+        engine.updateSession(
+          sessionId,
+          state: state,
+          event: payload.event,
+          metadata: metadata,
+          suppressOneShotVisual: suppressNotificationVisual
+        )
         emitPassiveNotificationIfNeeded(payload: payload, state: state, agentId: agentId, sessionId: sessionId, preferences: prefs, metadata: metadata)
       }
       send(connection, status: 200, body: "ok")

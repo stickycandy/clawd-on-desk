@@ -164,7 +164,13 @@ public final class StateEngine: @unchecked Sendable {
     }
   }
 
-  public func updateSession(_ sessionId: String, state: ClawdState, event: String?, metadata: SessionMetadata = SessionMetadata()) {
+  public func updateSession(
+    _ sessionId: String,
+    state: ClawdState,
+    event: String?,
+    metadata: SessionMetadata = SessionMetadata(),
+    suppressOneShotVisual: Bool = false
+  ) {
     let trimmed = sessionId.trimmingCharacters(in: .whitespacesAndNewlines)
     let sid = trimmed.isEmpty ? "default" : trimmed
     publish {
@@ -196,7 +202,7 @@ public final class StateEngine: @unchecked Sendable {
           setStateLocked(.notification, force: false)
         }
       } else if state.storesAsIdleOneShot {
-        if doNotDisturb {
+        if doNotDisturb || suppressOneShotVisual {
           recomputeLocked(force: false)
         } else {
           setStateLocked(state, force: false)
