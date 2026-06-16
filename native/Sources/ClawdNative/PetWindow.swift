@@ -9,6 +9,7 @@ final class PetWindowController: NSWindowController {
   private var subscription: UUID?
   private var currentSnapshot = StateSnapshot(currentState: .idle, sessions: [], updatedAt: Date())
   private var applyingPreferenceFrame = false
+  private var suppressNextPreferenceFrame = false
   private var forceImmediatePreferenceFrame = false
   private var petDragInProgress = false
   private var miniPeekActive = false
@@ -102,19 +103,30 @@ final class PetWindowController: NSWindowController {
     guard let frame = window?.frame else { return }
     let prefs = preferencesStore.get()
     if prefs.miniMode { return }
-    _ = try? preferencesStore.update { prefs in
-      prefs.x = frame.origin.x
-      prefs.y = frame.origin.y
-      prefs.positionSaved = true
-      prefs.savedPixelWidth = frame.width
-      prefs.savedPixelHeight = frame.height
-      prefs.positionThemeId = prefs.theme
-      prefs.positionVariantId = prefs.themeVariant[prefs.theme] ?? "default"
-      prefs.positionDisplay = Self.displaySnapshot(window?.screen)
+    suppressNextPreferenceFrame = true
+    do {
+      _ = try preferencesStore.update { prefs in
+        prefs.x = frame.origin.x
+        prefs.y = frame.origin.y
+        prefs.preMiniX = frame.origin.x
+        prefs.preMiniY = frame.origin.y
+        prefs.positionSaved = true
+        prefs.savedPixelWidth = frame.width
+        prefs.savedPixelHeight = frame.height
+        prefs.positionThemeId = prefs.theme
+        prefs.positionVariantId = prefs.themeVariant[prefs.theme] ?? "default"
+        prefs.positionDisplay = Self.displaySnapshot(window?.screen)
+      }
+    } catch {
+      suppressNextPreferenceFrame = false
     }
   }
 
   @objc private func preferencesDidChange() {
+    if suppressNextPreferenceFrame {
+      suppressNextPreferenceFrame = false
+      return
+    }
     let animated = !forceImmediatePreferenceFrame
     forceImmediatePreferenceFrame = false
     applyWindowPreferences(animated: animated)
@@ -168,10 +180,10 @@ final class PetWindowController: NSWindowController {
       } else {
         origin = NSPoint(x: visible.maxX - targetSize.width * (1 - offsetRatio), y: y)
       }
-    } else if let x = prefs.preMiniX, let y = prefs.preMiniY {
-      origin = NSPoint(x: x, y: y)
     } else if prefs.positionSaved {
       origin = NSPoint(x: prefs.x, y: prefs.y)
+    } else if let x = prefs.preMiniX, let y = prefs.preMiniY {
+      origin = NSPoint(x: x, y: y)
     }
     var frame = clamp(NSRect(origin: origin, size: targetSize), visible: visible, allowEdgePinning: prefs.allowEdgePinning || mini)
     if miniPeekActive,
